@@ -20,10 +20,20 @@ dp = Dispatcher(storage=MemoryStorage())
 class DepositState(StatesGroup):
     waiting_for_proof = State()
 
-AVAILABLE_EMAILS = [
-    "user1_2026@gmail.com:Pass1234",
-    "user2_2026@gmail.com:Pass5678",
-    "user3_2026@gmail.com:Pass9999"
+# مخازن الإيميلات حسب الفئات
+EMAILS_OLD = [
+    "old_user1_2026@gmail.com:Pass1234",
+    "old_user2_2026@gmail.com:Pass5678"
+]
+
+EMAILS_NEW = [
+    "new_user1_2026@gmail.com:Pass1234",
+    "new_user2_2026@gmail.com:Pass5678"
+]
+
+EMAILS_MEDIUM = [
+    "med_user1_2026@gmail.com:Pass1234",
+    "med_user2_2026@gmail.com:Pass5678"
 ]
 
 def main_menu():
@@ -33,9 +43,16 @@ def main_menu():
     btn4 = InlineKeyboardButton(text="🛠 الدعم الفني", callback_data="support_info")
     return InlineKeyboardMarkup(inline_keyboard=[[btn1], [btn2], [btn3], [btn4]])
 
-def emails_menu():
-    btn_buy = InlineKeyboardButton(text="🛒 تأكيد الشراء الآن", callback_data="buy_email")
+def email_categories_menu():
+    btn1 = InlineKeyboardButton(text="1️⃣ إيميلات قديمة (0.6$)", callback_data="cat_old")
+    btn2 = InlineKeyboardButton(text="2️⃣ إيميلات جديدة (0.35$)", callback_data="cat_new")
+    btn3 = InlineKeyboardButton(text="3️⃣ إيميلات (7-30 يوم) (0.6$)", callback_data="cat_medium")
     btn_back = InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")
+    return InlineKeyboardMarkup(inline_keyboard=[[btn1], [btn2], [btn3], [btn_back]])
+
+def buy_menu(category_code):
+    btn_buy = InlineKeyboardButton(text="🛒 تأكيد الشراء الآن", callback_data=f"buy_{category_code}")
+    btn_back = InlineKeyboardButton(text="🔙 العودة لفئات الإيميلات", callback_data="list_emails")
     return InlineKeyboardMarkup(inline_keyboard=[[btn_buy], [btn_back]])
 
 def payment_menu():
@@ -66,26 +83,59 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data
     
     if data == "list_emails":
-        count = len(AVAILABLE_EMAILS)
-        text = (
-            f"📦 **مخزن الإيميلات المتوفرة:**\n\n"
-            f"• عدد الإيميلات المتاحة للبيع: `{count}` إيميل\n"
-            f"• النوع: Gmail جاهز ومفعل\n"
-            f"• السعر: 1$ لكل إيميل\n\n"
-            f"👇 اضغط على زر **تأكيد الشراء الآن** للظفر بإيميلك فوراً:"
-        )
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=emails_menu())
+        text = "📦 **يرجى اختيار فئة الإيميلات المطلوبة من القائمة أدناه:**"
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=email_categories_menu())
         
-    elif data == "buy_email":
-        if AVAILABLE_EMAILS:
-            email_data = AVAILABLE_EMAILS.pop(0)
+    elif data == "cat_old":
+        count = len(EMAILS_OLD)
+        text = (
+            f"📌 **1️⃣ إيميلات قديمة:**\n\n"
+            f"💵 **السعر:** 0.6$\n"
+            f"📅 **العمر:** تاريخ إنشاء من نصف سنة إلى 5 سنين\n"
+            f"📊 **المتوفر:** `{count}` إيميل\n"
+            f"🛡 **الكفالة:** لمدة يومين من تاريخ الشراء\n\n"
+            f"⚠️ **ملاحظة هامة:** يجب إضافتها أول مرة على إنترنت سوري.\n"
+            f"في حال طلب الإيميل تحقق، يرجى التواصل مع الدعم وسنكمل عملية التحقق فوراً.\n\n"
+            f"👇 اضغط على **تأكيد الشراء الآن** للشراء:"
+        )
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=buy_menu("old"))
+
+    elif data == "cat_new":
+        count = len(EMAILS_NEW)
+        text = (
+            f"📌 **2️⃣ إيميلات جديدة:**\n\n"
+            f"💵 **السعر:** 0.35$\n"
+            f"📊 **المتوفر:** `{count}` إيميل\n"
+            f"🛡 **الكفالة:** لمدة 24 ساعة من تاريخ الشراء\n\n"
+            f"👇 اضغط على **تأكيد الشراء الآن** للشراء:"
+        )
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=buy_menu("new"))
+
+    elif data == "cat_medium":
+        count = len(EMAILS_MEDIUM)
+        text = (
+            f"📌 **3️⃣ إيميلات (من 7 أيام إلى 30 يوم):**\n\n"
+            f"💵 **السعر:** 0.6$\n"
+            f"📅 **العمر:** من 7 أيام إلى 30 يوم\n"
+            f"📊 **المتوفر:** `{count}` إيميل\n"
+            f"🛡 **الكفالة:** لمدة يومين من تاريخ الشراء\n\n"
+            f"👇 اضغط على **تأكيد الشراء الآن** للشراء:"
+        )
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=buy_menu("medium"))
+        
+    elif data.startswith("buy_"):
+        cat = data.split("_")[1]
+        target_list = EMAILS_OLD if cat == "old" else (EMAILS_NEW if cat == "new" else EMAILS_MEDIUM)
+        
+        if target_list:
+            email_data = target_list.pop(0)
             text = (
                 f"✅ **تم الشراء بنجاح!**\n\n"
                 f"📧 **بيانات الإيميل:**\n`{email_data}`\n\n"
                 f"*اضغط على النص أعلاه لنسخه مباشرة.*"
             )
         else:
-            text = "❌ **عذراً، المخزن فارغ حالياً!**\nيرجى التواصل مع الدعم لتعبئة المخزن."
+            text = "❌ **عذراً، هذه الفئة فارغة حالياً!**\nيرجى التواصل مع الدعم لتعبئة المخزن."
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
         
     elif data == "payment_methods":
@@ -182,4 +232,8 @@ async def main():
     print("🚀 البوت يعمل مع خادم الاستجابة...")
     await bot.delete_webhook(drop_pending_updates=True)
     await start_web_server()
-    await dp
+    await dp.start_polling(bot, handle_signals=False)
+
+if __name__ == '__main__':
+    asyncio.run(main())
+
