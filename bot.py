@@ -225,7 +225,6 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await state.clear()
         bot_info = await bot.get_me()
         
-        # حساب عدد الأصدقاء الذين أتموا عملية شراء واحدة على الأقل
         referred_users = user_referrals.get(user_id, [])
         completed_refs = sum(1 for ref_id in referred_users if user_purchases.get(ref_id, 0) > 0)
         
@@ -287,11 +286,66 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
     new_bal = update_user_balance(user_id, -total_cost)
     purchased_emails = [stock[i] for i in range(qty)]
 
-    # تسجيل أن المستخدم قام بعملية شراء
     user_purchases[user_id] = user_purchases.get(user_id, 0) + qty
 
-    emails_str = "\n".join(purchased_emails
+    emails_str = "\n".join(purchased_emails)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
+    await message.answer(f"✅ **تمت عملية الشراء بنجاح!**\n\n📦 الكمية: {qty}\n💰 المتبقي: `{new_bal:.2f}$`\n\n📧 الإيميلات:\n`{emails_str}`", parse_mode="Markdown", reply_markup=kb)
+    await state.clear()
 
+@dp.message(DepositState.waiting_for_proof)
+async def process_proof(message: types.Message, state: FSMContext):
+    await state.clear()
+    user_id = message.from_user.id
+    text_content = (message.text or message.caption or "").strip()
+    pending_operations[user_id] = text_content
 
+    kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
+    await message.answer("⏳ **تم استلام رقم العملية، جاري المراجعة...**", parse_mode="Markdown", reply_markup=kb_back)
+    
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ قبول وتحديد المبلغ", callback_data=f"adm_app_{user_id}")],
+        [InlineKeyboardButton(text="❌ رفض الطلب", callback_data=f"adm_rej_{user_id}")]
+    ])
+    
+    await bot.send_message(chat_id=ADMIN_ID, text=f"📥 **طلب شحن جديد!**\n👤 من: {message.from_user.full_name}\n🆔 ID: `{user_id}`\n📝 العملية: `{text_content}`", parse_mode="Markdown", reply_markup=admin_kb)
 
+@dp.message(lambda message: message.from_user.id == ADMIN_ID and ADMIN_ID in admin_action_target)
+async def process_admin_amount_input(message: types.Message):
+    client_id = admin_action_target.pop(ADMIN_ID, None)
+    if not client_id:
+        return
 
+    try:
+        amount_to_add = float(message.text.strip())
+    except ValueError:
+        await message.answer("❌ يرجى إرسال رقم صحيح للمبلغ:")
+        admin_action_target[ADMIN_ID] = client_id
+        return
+
+    new_bal = update_user_balance(client_id, amount_to_add)
+    try:
+        await bot.send_message(chat_id=client_id, text=f"🎉 **تم قبول الإيداع وإضافة الرصيد!**\n➕ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك: `{new_bal:.2f}$`", parse_mode="Markdown")
+    except:
+        pass
+
+    await message.answer(f"✅ تمت إضافة `{amount_to_add:.2f}$` للزبون بنجاح.")
+
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 10000)))
+    await site.start()
+
+async def main():
+    await bot.delete_webhook(drop_pending_updates=True)
+    await start_web_server()
+    await dp.start_polling(bot, handle_signals=False)
+
+if __name__ == '__main__':
+    asyncio.run(main())
