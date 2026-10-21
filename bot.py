@@ -21,14 +21,11 @@ class DepositState(StatesGroup):
     waiting_for_proof = State()
 
 user_balances = {}
-pending_deposits = {}
-deposit_amounts = {}
+pending_operations = {}  # حفظ رقم العملية للزبون
+admin_action_target = {} # لتتبع العملية عندما يرسل المدير المبلغ
 
-# نظام الإحالات {user_id: [referred_user_ids]}
 referrals = {}
-# نظام عدد عمليات الشراء التي قام بها كل مستخدم لمعالجة الإحالة
 user_purchases_count = {}
-# لتخزين من قام بدعوة من {referred_user_id: inviter_id}
 inviters = {}
 
 EMAILS_OLD = [
@@ -67,7 +64,6 @@ async def send_welcome(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     args = message.text.split()
     
-    # معالجة رابط الإحالة إذا دخل المستخدم عن طريق صديق
     if len(args) > 1 and args[1].isdigit():
         inviter_id = int(args[1])
         if inviter_id != user_id and user_id not in inviters.values():
@@ -123,21 +119,17 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         user_balances[user_id] -= price
         email_data = stock.pop(0)
         
-        # تسجيل عملية شراء للمستخدم لمعالجة شرط الإحالة
         user_purchases_count[user_id] = user_purchases_count.get(user_id, 0) + 1
         
-        # التحقق إذا كان هذا الشخص دُعي من قِبل شخص آخر وقام بأول عملية شراء له
         if user_purchases_count[user_id] == 1 and user_id in inviters:
             inviter_id = inviters[user_id]
-            # نتحقق من عدد الأصدقاء المدعوين الذين قاموا بعملية شراء واحدة على الأقل
             valid_refs = [ref for ref in referrals.get(inviter_id, []) if user_purchases_count.get(ref, 0) >= 1]
             if len(valid_refs) == 5:
-                # مكافأة الداعي بإيميل قديم مجاني (إضافة رصيد 0.60$ يغطي ثمن إيميل قديم)
                 user_balances[inviter_id] = get_user_balance(inviter_id) + 0.60
                 try:
                     await bot.send_message(
                         chat_id=inviter_id,
-                        text="🎁 **تهانينا!** لقد أتم أصدقاؤك الـ 5 المدعوون عملية الشراء الأولى بنجاح.\nتمت إضافة رصيد بقيمة `0.60$` (ثمن إيميل قديم) إلى حسابك كهدية إحالة! 🎉",
+                        text="🎁 **تهانينا!** لقد أتم أصدقاؤك الـ 5 المدعوون عملية الشراء الأولى بنجاح.\nتمت إضافة رصيد بقيمة `0.60$` إلى حسابك كهدية إحالة! 🎉",
                         parse_mode="Markdown"
                     )
                 except:
@@ -156,65 +148,51 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
 
     elif data == "pay_sham":
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ أرسل إشعار التحويل لشحن الرصيد", callback_data="check_payment")],
+            [InlineKeyboardButton(text="✅ إرسال رقم عملية شام كاش", callback_data="check_payment")],
             [InlineKeyboardButton(text="🔙 العودة لطرق الدفع", callback_data="payment_methods")]
         ])
         await callback.message.edit_text(
             "📌 **1️⃣ شام كاش**\n\n"
             "يرجى التحويل إلى العنوان التالي:\n"
             "`18a4c2941387daeaf0256639ffc705e8`\n\n"
-            "✅ **العملات المقبولة:** الدولار الأمريكي (USD) والليرة السورية (SYP)\n"
-            "💱 **سعر الصرف الحالي في البوت:**\n`1 USD = 141 SYP`\n\n"
-            "⚠️ بعد التحويل اضغط على **أرسل إشعار التحويل لشحن الرصيد**.",
+            "⚠️ بعد التحويل اضغط على الزر أدناه وأرسل **رقم العملية** فقط.",
             parse_mode="Markdown",
             reply_markup=kb
         )
 
     elif data == "pay_crypto":
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ أرسل إشعار التحويل لشحن الرصيد", callback_data="check_payment")],
+            [InlineKeyboardButton(text="✅ إرسال رقم عملية USDT", callback_data="check_payment")],
             [InlineKeyboardButton(text="🔙 العودة لطرق الدفع", callback_data="payment_methods")]
         ])
         await callback.message.edit_text(
             "📌 **2️⃣ عملات رقمية (USDT)**\n\n"
             "🔹 **USDT (BEP20):**\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\n"
             "🔹 **USDT (TRC20):**\n`TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx`\n\n"
-            "⚠️ **الحد الأدنى للإيداع:** `0.2 USDT`\n\n"
-            "⚠️ أرسل العملية ثم اضغط على زر **أرسل إشعار التحويل لشحن الرصيد**.",
+            "⚠️ أرسل العملية ثم اضغط على الزر أدناه وأرسل **رقم العملية (TxID)** فقط.",
             parse_mode="Markdown",
             reply_markup=kb
         )
 
     elif data == "check_payment":
         await state.set_state(DepositState.waiting_for_proof)
-        await callback.message.edit_text("📩 **يرجى كتابة المبلغ الذي تحويله ورقم العملية (أو إرسال صورة الإشعار):**", parse_mode="Markdown")
+        await callback.message.edit_text("📩 **يرجى إرسال رقم العملية فقط (بدون أي مبلغ أو صور):**", parse_mode="Markdown")
 
     elif data.startswith("adm_app_"):
-        dep_id = data.replace("adm_app_", "")
-        client_id = pending_deposits.get(dep_id)
-        amount_to_add = deposit_amounts.get(dep_id, 0.60)
-        
-        if client_id:
-            user_balances[client_id] = get_user_balance(client_id) + amount_to_add
-            try:
-                await bot.send_message(chat_id=client_id, text=f"🎉 **تم قبول الإيداع وإضافة الرصيد بنجاح!**\n➕ المبلغ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك الحالي: `{user_balances[client_id]:.2f}$`", parse_mode="Markdown")
-            except:
-                pass
-            await callback.message.edit_text(f"{callback.message.text}\n\n✅ **تم قبول الطلب وإضافة {amount_to_add:.2f}$ للزبون!**", parse_mode="Markdown")
+        client_id = int(data.replace("adm_app_", ""))
+        admin_action_target[ADMIN_ID] = client_id
+        await callback.message.answer("✍️ **أرسل الآن المبلغ بالدولار (مثال: 0.65 أو 1.5) في رسالة جديدة ليتم إضافته لرصيد الزبون:**", parse_mode="Markdown")
 
     elif data.startswith("adm_rej_"):
-        dep_id = data.replace("adm_rej_", "")
-        client_id = pending_deposits.get(dep_id)
-        if client_id:
-            try:
-                await bot.send_message(chat_id=client_id, text="❌ **عذراً، تم رفض طلب الشحن من قبل الإدارة.**")
-            except:
-                pass
-            await callback.message.edit_text(f"{callback.message.text}\n\n❌ **تم رفض الطلب.**", parse_mode="Markdown")
+        client_id = int(data.replace("adm_rej_", ""))
+        try:
+            await bot.send_message(chat_id=client_id, text="❌ **عذراً، تم رفض طلب الشحن من قبل الإدارة.**", parse_mode="Markdown")
+        except:
+            pass
+        await callback.message.edit_text(f"{callback.message.text}\n\n❌ **تم رفض الطلب.**", parse_mode="Markdown")
 
     elif data == "referral_system":
         bot_info = await bot.get_me()
-        # حساب عدد الأصدقاء الذين أكملوا عملية شراء واحدة من دعوات هذا المستخدم
         completed_refs = len([ref for ref in referrals.get(user_id, []) if user_purchases_count.get(ref, 0) >= 1])
         ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
@@ -242,35 +220,58 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
 async def process_proof(message: types.Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
-    dep_id = str(user_id)
-    pending_deposits[dep_id] = user_id
-
-    extracted_amount = 0.60
-    if message.text:
-        import re
-        numbers = re.findall(r'\d+\.\d+|\d+', message.text)
-        if numbers:
-            extracted_amount = float(numbers[0])
-            
-    deposit_amounts[dep_id] = extracted_amount
+    text_content = (message.text or message.caption or "").strip()
+    
+    pending_operations[user_id] = text_content
 
     kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-    await message.answer("⏳ **تم استلام طلبك بنجاح!**\nجاري التحقق وإضافة الرصيد...", parse_mode="Markdown", reply_markup=kb_back)
+    await message.answer("⏳ **تم استلام رقم العملية بنجاح!**\nجاري مراجعته من قبل الإدارة...", parse_mode="Markdown", reply_markup=kb_back)
     
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"✅ قبول وإضافة ({extracted_amount:.2f}$)", callback_data=f"adm_app_{dep_id}")],
-        [InlineKeyboardButton(text="❌ رفض الطلب", callback_data=f"adm_rej_{dep_id}")]
+        [InlineKeyboardButton(text="✅ قبول وتحديد المبلغ", callback_data=f"adm_app_{user_id}")],
+        [InlineKeyboardButton(text="❌ رفض الطلب", callback_data=f"adm_rej_{user_id}")]
     ])
     
-    admin_text = f"📥 **طلب شحن جديد!**\n👤 الزبون: {message.from_user.full_name}\n🆔 ID: `{user_id}`\n💰 المبلغ المستخرج: `{extracted_amount:.2f}$`\n📝 التفاصيل: {message.text or 'صورة إشعار'}"
+    admin_text = (
+        f"📥 **طلب شحن جديد!**\n"
+        f"👤 الزبون: {message.from_user.full_name}\n"
+        f"🆔 ID: `{user_id}`\n"
+        f"📝 رقم العملية المرسل: `{text_content}`"
+    )
     
     try:
-        if message.photo:
-            await bot.send_photo(chat_id=ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_text, parse_mode="Markdown", reply_markup=admin_kb)
-        else:
-            await bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="Markdown", reply_markup=admin_kb)
+        await bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="Markdown", reply_markup=admin_kb)
     except Exception as e:
         logging.error(f"Admin error: {e}")
+
+# استقبال المبلغ من المدير بعد النقر على زر قبول
+@dp.message(lambda message: message.from_user.id == ADMIN_ID and ADMIN_ID in admin_action_target)
+async def process_admin_amount_input(message: types.Message):
+    client_id = admin_action_target.pop(ADMIN_ID, None)
+    if not client_id:
+        return
+
+    try:
+        amount_to_add = float(message.text.strip())
+    except ValueError:
+        await message.answer("❌ يرجى إرسال رقم صحيح للمبلغ (مثال: `0.65` أو `1`)")
+        admin_action_target[ADMIN_ID] = client_id  # إعادة تعيين الهدف
+        return
+
+    # إضافة الرصيد للزبون
+    user_balances[client_id] = get_user_balance(client_id) + amount_to_add
+    
+    try:
+        await bot.send_message(
+            chat_id=client_id, 
+            text=f"🎉 **تم قبول الإيداع وإضافة الرصيد بنجاح!**\n➕ المبلغ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك الحالي: `{user_balances[client_id]:.2f}$`", 
+            parse_mode="Markdown"
+        )
+    except:
+        pass
+
+    op_num = pending_operations.get(client_id, "غير متوفر")
+    await message.answer(f"✅ **تمت الإنجاز بنجاح!**\nتمت إضافة `{amount_to_add:.2f}$` للزبون (رقم العملية: `{op_num}`).", parse_mode="Markdown")
 
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
