@@ -92,15 +92,45 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text("📦 **اختر فئة الإيميلات المطلوبة:**", parse_mode="Markdown", reply_markup=kb)
         
     elif data in ["cat_old", "cat_new", "cat_medium"]:
-        cat_name = "إيميلات قديمة" if data == "cat_old" else ("إيميلات جديدة" if data == "cat_new" else "إيميلات متوسطة")
-        price = 0.35 if data == "cat_new" else 0.60
-        count = len(EMAILS_OLD) if data == "cat_old" else (len(EMAILS_NEW) if data == "cat_new" else len(EMAILS_MEDIUM))
+        if data == "cat_old":
+            cat_name = "إيميلات قديمة"
+            price = 0.60
+            count = len(EMAILS_OLD)
+            details = (
+                "📌 **إيميلات قديمة**\n"
+                "💵 **السعر:** 0.6$\n"
+                "📊 **المتوفر:** `{count}` إيميل\n"
+                "🗓 **تاريخ الإنشاء:** من نصف سنة حتى 5 سنين\n"
+                "🛡 **الكفالة:** مدة يومين من تاريخ الشراء\n"
+                "⚠️ **تنبيه:** يجب إدخالهم أول مرة بإنترنت سوري، وفي حال طلب الإيميل تحقق يرجى التواصل مع الدعم لإكمالها فوراً."
+            ).format(count=count)
+        elif data == "cat_new":
+            cat_name = "إيميلات جديدة"
+            price = 0.35
+            count = len(EMAILS_NEW)
+            details = (
+                "📌 **إيميلات جديدة**\n"
+                "💵 **السعر:** 0.35$\n"
+                "📊 **المتوفر:** `{count}` إيميل\n"
+                "🛡 **الكفالة:** 24 ساعة من تاريخ الشراء"
+            ).format(count=count)
+        else:
+            cat_name = "إيميلات (7-30 يوم)"
+            price = 0.60
+            count = len(EMAILS_MEDIUM)
+            details = (
+                "📌 **إيميلات (7-30 يوم)**\n"
+                "💵 **السعر:** 0.6$\n"
+                "📊 **المتوفر:** `{count}` إيميل\n"
+                "🗓 **تاريخ الإنشاء:** من (7 - 30 أيام)\n"
+                "🛡 **الكفالة:** يومين من تاريخ الشراء"
+            ).format(count=count)
         
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🛒 شراء الآن بالرصيد", callback_data=f"buy_{data}")],
             [InlineKeyboardButton(text="🔙 العودة لفئات الإيميلات", callback_data="list_emails")]
         ])
-        await callback.message.edit_text(f"📌 **{cat_name}**\n💵 **السعر:** {price}$\n📊 **المتوفر:** `{count}` إيميل\n\nاضغط للشراء المباشر:", parse_mode="Markdown", reply_markup=kb)
+        await callback.message.edit_text(f"{details}\n\nاضغط للشراء المباشر:", parse_mode="Markdown", reply_markup=kb)
 
     elif data.startswith("buy_"):
         cat = data.replace("buy_", "")
@@ -234,5 +264,58 @@ async def process_proof(message: types.Message, state: FSMContext):
     
     admin_text = (
         f"📥 **طلب شحن جديد!**\n"
-        f"👤 الزبون: {message.from_user.full_name
+        f"👤 الزبون: {message.from_user.full_name}\n"
+        f"🆔 ID: `{user_id}`\n"
+        f"📝 رقم العملية المرسل: `{text_content}`"
+    )
+    
+    try:
+        await bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="Markdown", reply_markup=admin_kb)
+    except Exception as e:
+        logging.error(f"Admin error: {e}")
 
+@dp.message(lambda message: message.from_user.id == ADMIN_ID and ADMIN_ID in admin_action_target)
+async def process_admin_amount_input(message: types.Message):
+    client_id = admin_action_target.pop(ADMIN_ID, None)
+    if not client_id:
+        return
+
+    try:
+        amount_to_add = float(message.text.strip())
+    except ValueError:
+        await message.answer("❌ يرجى إرسال رقم صحيح للمبلغ (مثال: `0.65`)")
+        admin_action_target[ADMIN_ID] = client_id
+        return
+
+    user_balances[client_id] = get_user_balance(client_id) + amount_to_add
+    
+    try:
+        await bot.send_message(
+            chat_id=client_id, 
+            text=f"🎉 **تم قبول الإيداع وإضافة الرصيد بنجاح!**\n➕ المبلغ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك الحالي: `{user_balances[client_id]:.2f}$`", 
+            parse_mode="Markdown"
+        )
+    except:
+        pass
+
+    op_num = pending_operations.get(client_id, "غير متوفر")
+    await message.answer(f"✅ **تمت العملية بنجاح!**\nتمت إضافة `{amount_to_add:.2f}$` للزبون (رقم العملية: `{op_num}`).", parse_mode="Markdown")
+
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 10000)))
+    await site.start()
+
+async def main():
+    await bot.delete_webhook(drop_pending_updates=True)
+    await start_web_server()
+    await dp.start_polling(bot, handle_signals=False)
+
+if __name__ == '__main__':
+    asyncio.run(main())
