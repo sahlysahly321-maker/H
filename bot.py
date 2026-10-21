@@ -21,8 +21,8 @@ class DepositState(StatesGroup):
     waiting_for_proof = State()
 
 user_balances = {}
-pending_operations = {}  # حفظ رقم العملية للزبون
-admin_action_target = {} # لتتبع العملية عندما يرسل المدير المبلغ
+pending_operations = {}
+admin_action_target = {}
 
 referrals = {}
 user_purchases_count = {}
@@ -155,7 +155,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             "📌 **1️⃣ شام كاش**\n\n"
             "يرجى التحويل إلى العنوان التالي:\n"
             "`18a4c2941387daeaf0256639ffc705e8`\n\n"
-            "⚠️ بعد التحويل اضغط على الزر أدناه وأرسل **رقم العملية** فقط.",
+            "⚠️ بعد التحويل اضغط على الزر أدناه وأرسل **رقم العملية** فقط بدون صور أو مبالغ.",
             parse_mode="Markdown",
             reply_markup=kb
         )
@@ -169,7 +169,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             "📌 **2️⃣ عملات رقمية (USDT)**\n\n"
             "🔹 **USDT (BEP20):**\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\n"
             "🔹 **USDT (TRC20):**\n`TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx`\n\n"
-            "⚠️ أرسل العملية ثم اضغط على الزر أدناه وأرسل **رقم العملية (TxID)** فقط.",
+            "⚠️ أرسل العملية ثم اضغط على الزر أدناه وأرسل **رقم العملية (TxID)** فقط بدون صور أو مبالغ.",
             parse_mode="Markdown",
             reply_markup=kb
         )
@@ -181,7 +181,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     elif data.startswith("adm_app_"):
         client_id = int(data.replace("adm_app_", ""))
         admin_action_target[ADMIN_ID] = client_id
-        await callback.message.answer("✍️ **أرسل الآن المبلغ بالدولار (مثال: 0.65 أو 1.5) في رسالة جديدة ليتم إضافته لرصيد الزبون:**", parse_mode="Markdown")
+        await callback.message.answer("✍️ **أرسل الآن المبلغ بالدولار (مثال: 0.65) في رسالة جديدة لإضافته لرصيد الزبون:**", parse_mode="Markdown")
 
     elif data.startswith("adm_rej_"):
         client_id = int(data.replace("adm_rej_", ""))
@@ -234,60 +234,5 @@ async def process_proof(message: types.Message, state: FSMContext):
     
     admin_text = (
         f"📥 **طلب شحن جديد!**\n"
-        f"👤 الزبون: {message.from_user.full_name}\n"
-        f"🆔 ID: `{user_id}`\n"
-        f"📝 رقم العملية المرسل: `{text_content}`"
-    )
-    
-    try:
-        await bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="Markdown", reply_markup=admin_kb)
-    except Exception as e:
-        logging.error(f"Admin error: {e}")
+        f"👤 الزبون: {message.from_user.full_name
 
-# استقبال المبلغ من المدير بعد النقر على زر قبول
-@dp.message(lambda message: message.from_user.id == ADMIN_ID and ADMIN_ID in admin_action_target)
-async def process_admin_amount_input(message: types.Message):
-    client_id = admin_action_target.pop(ADMIN_ID, None)
-    if not client_id:
-        return
-
-    try:
-        amount_to_add = float(message.text.strip())
-    except ValueError:
-        await message.answer("❌ يرجى إرسال رقم صحيح للمبلغ (مثال: `0.65` أو `1`)")
-        admin_action_target[ADMIN_ID] = client_id  # إعادة تعيين الهدف
-        return
-
-    # إضافة الرصيد للزبون
-    user_balances[client_id] = get_user_balance(client_id) + amount_to_add
-    
-    try:
-        await bot.send_message(
-            chat_id=client_id, 
-            text=f"🎉 **تم قبول الإيداع وإضافة الرصيد بنجاح!**\n➕ المبلغ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك الحالي: `{user_balances[client_id]:.2f}$`", 
-            parse_mode="Markdown"
-        )
-    except:
-        pass
-
-    op_num = pending_operations.get(client_id, "غير متوفر")
-    await message.answer(f"✅ **تمت الإنجاز بنجاح!**\nتمت إضافة `{amount_to_add:.2f}$` للزبون (رقم العملية: `{op_num}`).", parse_mode="Markdown")
-
-async def handle_ping(request):
-    return web.Response(text="Bot is running!")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 10000)))
-    await site.start()
-
-async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
-    await start_web_server()
-    await dp.start_polling(bot, handle_signals=False)
-
-if __name__ == '__main__':
-    asyncio.run(main())
