@@ -1,8 +1,7 @@
-import asyncio
+iimport asyncio
 import logging
 import os
 import urllib.request
-import urllib.parse
 import csv
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
@@ -44,36 +43,32 @@ class BuyState(StatesGroup):
 pending_operations = {}
 admin_action_target = {}
 
-def fetch_emails_with_rows(col_index):
+def fetch_emails_from_sheet(col_index):
     try:
         url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=Emails"
         web_page = urllib.request.urlopen(url)
         lines = [line.decode('utf-8') for line in web_page.readlines()]
         reader = csv.reader(lines)
         
-        results = []
-        for row_idx, row in enumerate(reader):
+        emails_list = []
+        for row in reader:
             if len(row) > col_index and row[col_index].strip():
                 val = row[col_index].strip().strip('"')
                 if "@" in val:
-                    results.append((row_idx + 1, val)) # حفظ رقم الصف مع الإيميل
-        return results
+                    emails_list.append(val)
+        return emails_list
     except Exception as e:
         logging.error(f"Error fetching emails: {e}")
         return []
 
 def get_stock(cat):
     if cat == "cat_old":
-        return fetch_emails_with_rows(0)
+        return fetch_emails_from_sheet(0)
     elif cat == "cat_new":
-        return fetch_emails_with_rows(1)
+        return fetch_emails_from_sheet(1)
     elif cat == "cat_medium":
-        return fetch_emails_with_rows(2)
+        return fetch_emails_from_sheet(2)
     return []
-
-# دالة لحذف الإيميل المباع من جدول Google Sheets أوتوماتيكياً عبر النشر العام أو سكربت Apps Script المربوط
-# بما أن الجدول قراءة، سنقوم بتحديث طريقة إخفائه محلياً من القائمة، ولحذف نهائي من السطر يمكننا استخدام رابط تحديث أو طلب ويب مخصص.
-# الأبسط والأضمن برمجياً هنا لتحديث المخزن فوراً هو الاعتماد على القائمة الحية وتحديث الصفوف.
 
 def main_menu(user_id):
     bal = get_user_balance(user_id)
@@ -120,33 +115,15 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         
     elif data in ["cat_old", "cat_new", "cat_medium"]:
         await state.clear()
-        stock_items = get_stock(data)
-        count = len(stock_items)
+        stock = get_stock(data)
+        count = len(stock)
         
         if data == "cat_old":
-            details = (
-                f"📌 **إيميلات قديمة**\n"
-                f"💵 **السعر لكل منتج:** `0.60$`\n"
-                f"📊 **الكمية المتاحة:** `{count}`\n"
-                f"🗓 **تاريخ الإنشاء:** من نصف سنة حتى 5 سنين\n"
-                f"🛡 **الكفالة:** يومين من تاريخ الشراء\n"
-                f"⚠️ **تنبيه:** يجب إدخالهم أول مرة بإنترنت سوري، وفي حال طلب الإيميل تحقق يرجى التواصل مع الدعم."
-            )
+            details = f"📌 **إيميلات قديمة**\n💵 **السعر:** `0.60$`\n📊 **المتوفر:** `{count}`\n🛡 **الكفالة:** يومين"
         elif data == "cat_new":
-            details = (
-                f"📌 **إيميلات جديدة**\n"
-                f"💵 **السعر لكل منتج:** `0.35$`\n"
-                f"📊 **الكمية المتاحة:** `{count}`\n"
-                f"🛡 **الكفالة:** 24 ساعة من تاريخ الشراء"
-            )
+            details = f"📌 **إيميلات جديدة**\n💵 **السعر:** `0.35$`\n📊 **المتوفر:** `{count}`\n🛡 **الكفالة:** 24 ساعة"
         else:
-            details = (
-                f"📌 **إيميلات (7-30 يوم)**\n"
-                f"💵 **السعر لكل منتج:** `0.60$`\n"
-                f"📊 **الكمية المتاحة:** `{count}`\n"
-                f"🗓 **تاريخ الإنشاء:** من (7 - 30 أيام)\n"
-                f"🛡 **الكفالة:** يومين من تاريخ الشراء"
-            )
+            details = f"📌 **إيميلات (7-30 يوم)**\n💵 **السعر:** `0.60$`\n📊 **المتوفر:** `{count}`\n🛡 **الكفالة:** يومين"
         
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🛒 شراء إيميلات", callback_data=f"buy_req_{data}")],
@@ -156,8 +133,8 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
 
     elif data.startswith("buy_req_"):
         cat = data.replace("buy_req_", "")
-        stock_items = get_stock(cat)
-        max_count = len(stock_items)
+        stock = get_stock(cat)
+        max_count = len(stock)
         
         if max_count == 0:
             await callback.answer("❌ عذراً، هذه الفئة نفدت من المخزن حالياً!", show_alert=True)
@@ -167,11 +144,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await state.set_state(BuyState.waiting_for_quantity)
         
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 إلغاء", callback_data="list_emails")]])
-        await callback.message.edit_text(
-            f"📥 **يرجى إدخال الكمية المطلوبة:**\nاكتب رقماً من `1` إلى `{max_count}` (العدد المتوفر):",
-            parse_mode="Markdown",
-            reply_markup=kb
-        )
+        await callback.message.edit_text(f"📥 **أدخل الكمية المطلوبة (من 1 إلى {max_count}):**", parse_mode="Markdown", reply_markup=kb)
 
     elif data == "payment_methods":
         await state.clear()
@@ -180,34 +153,21 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="2️⃣ عملات رقمية (USDT)", callback_data="pay_crypto")],
             [InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]
         ])
-        await callback.message.edit_text(f"💳 **شحن الرصيد وطرق الدفع:**\n\n💰 **رصيدك الحالي:** `{get_user_balance(user_id):.2f}$`", parse_mode="Markdown", reply_markup=kb)
+        await callback.message.edit_text(f"💳 **طرق الدفع:**\n\n💰 **رصيدك الحالي:** `{get_user_balance(user_id):.2f}$`", parse_mode="Markdown", reply_markup=kb)
 
     elif data == "pay_sham":
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ إرسال رقم العملية", callback_data="check_payment")],
             [InlineKeyboardButton(text="🔙 العودة", callback_data="payment_methods")]
         ])
-        await callback.message.edit_text(
-            "📌 **1️⃣ شام كاش**\n\n"
-            "العنوان:\n`18a4c2941387daeaf0256639ffc705e8`\n\n"
-            "⚠️ بعد التحويل اضغط على الزر أدناه وأرسل **رقم العملية** فقط بدون صور أو مبالغ.",
-            parse_mode="Markdown",
-            reply_markup=kb
-        )
+        await callback.message.edit_text("📌 **شام كاش:**\n`18a4c2941387daeaf0256639ffc705e8`\n\nاضغط أدناه لإرسال رقم العملية.", parse_mode="Markdown", reply_markup=kb)
 
     elif data == "pay_crypto":
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ إرسال رقم العملية", callback_data="check_payment")],
             [InlineKeyboardButton(text="🔙 العودة", callback_data="payment_methods")]
         ])
-        await callback.message.edit_text(
-            "📌 **2️⃣ عملات رقمية (USDT)**\n\n"
-            "🔹 **BEP20:**\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\n"
-            "🔹 **TRC20:**\n`TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx`\n\n"
-            "⚠️ بعد التحويل اضغط أدناه وأرسل **رقم العملية (TxID)** فقط.",
-            parse_mode="Markdown",
-            reply_markup=kb
-        )
+        await callback.message.edit_text("📌 **USDT:**\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\nاضغط أدناه لإرسال رقم العملية.", parse_mode="Markdown", reply_markup=kb)
 
     elif data == "check_payment":
         await state.set_state(DepositState.waiting_for_proof)
@@ -216,12 +176,12 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     elif data.startswith("adm_app_"):
         client_id = int(data.replace("adm_app_", ""))
         admin_action_target[ADMIN_ID] = client_id
-        await callback.message.answer("✍️ **أرسل المبلغ بالدولار لإضافته للزبون:**", parse_mode="Markdown")
+        await callback.message.answer("✍️ **أرسل المبلغ بالدولار:**", parse_mode="Markdown")
 
     elif data.startswith("adm_rej_"):
         client_id = int(data.replace("adm_rej_", ""))
         try:
-            await bot.send_message(chat_id=client_id, text="❌ **تم رفض طلب الشحن من قبل الإدارة.**", parse_mode="Markdown")
+            await bot.send_message(chat_id=client_id, text="❌ **تم رفض طلب الشحن.**", parse_mode="Markdown")
         except:
             pass
         await callback.message.edit_text(f"{callback.message.text}\n\n❌ **تم رفض الطلب.**", parse_mode="Markdown")
@@ -231,22 +191,14 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         bot_info = await bot.get_me()
         referred_users = user_referrals.get(user_id, [])
         completed_refs = sum(1 for ref_id in referred_users if user_purchases.get(ref_id, 0) > 0)
-        
         ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-        await callback.message.edit_text(
-            f"🎁 **برنامج الإحالة والمكافآت:**\n\n"
-            f"دعوة أصدقائك تمنحك إيميل قديم مجاناً (0.60$) عندما يقوم **5 من أصدقائك المدعوين** بإتمام **عملية شراء واحدة** على الأقل!\n\n"
-            f"📊 **تقدمك الحالي:** `{completed_refs} / 5` أصدقاء أتموا الشراء.\n\n"
-            f"🔗 **رابط الدعوة الخاص بك:**\n`{ref_link}`",
-            parse_mode="Markdown",
-            reply_markup=kb
-        )
+        await callback.message.edit_text(f"🎁 **نظام الإحالة:**\nتقدمك: `{completed_refs}/5`\nرابطك:\n`{ref_link}`", parse_mode="Markdown", reply_markup=kb)
 
     elif data == "support_info":
         await state.clear()
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-        await callback.message.edit_text(f"🛠 **الدعم الفني:**\nتواصل مع المالك: {ADMIN_USERNAME}", parse_mode="Markdown", reply_markup=kb)
+        await callback.message.edit_text(f"🛠 **الدعم الفني:** {ADMIN_USERNAME}", parse_mode="Markdown", reply_markup=kb)
 
     elif data == "back_to_main":
         await state.clear()
@@ -266,9 +218,9 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         await message.answer("❌ حدث خطأ، يرجى المحاولة من جديد.")
         return
 
-    stock_items = get_stock(cat)
+    stock = get_stock(cat)
     price = 0.35 if cat == "cat_new" else 0.60
-    max_count = len(stock_items)
+    max_count = len(stock)
 
     if not message.text.isdigit():
         await message.answer(f"❌ يرجى كتابة رقم صحيح (من 1 إلى {max_count}):")
@@ -288,20 +240,36 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         return
 
     new_bal = update_user_balance(user_id, -total_cost)
-    
-    # اختيار الإيميلات المباعة
-    purchased_emails = []
-    for i in range(qty):
-        purchased_emails.append(stock_items[i][1])
-        # ملاحظة: لحذفها يدوياً من الشيت أو عبر تطبيق الحذف المباشر
-        # لتسهيل الأمر لك، يمكنك ببساطة مسحها من ملف الـ Google Sheets يدويًا بعد بيعها، أو ترك البوت يستهلكها من القائمة النشطة.
-        # الأفضل هو حذفها من الجدول في هاتفك بعد إتمام الشراء لضمان عدم بيعها مجدداً.
-
+    purchased_emails = [stock[i] for i in range(qty)]
     user_purchases[user_id] = user_purchases.get(user_id, 0) + qty
 
     emails_str = "\n".join(purchased_emails)
+    
+    # رسالة نظيفة وجميلة للزبون
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-    await message.answer(f"✅ **تمت عملية الشراء بنجاح!**\n\n📦 الكمية: {qty}\n💰 المتبقي: `{new_bal:.2f}$`\n\n📧 الإيميلات الخاصة بك:\n`{emails_str}`\n\n⚠️ *ملاحظة إدارة المخزن:* يرجى حذف هذه الإيميلات من جدول Google Sheets الخاص بك حتى لا يتم بيعها مرة أخرى.", parse_mode="Markdown", reply_markup=kb)
+    await message.answer(
+        f"✅ **تمت عملية الشراء بنجاح!**\n\n"
+        f"📦 **الكمية:** {qty}\n"
+        f"💰 **الرصيد المتبقي:** `{new_bal:.2f}$`\n\n"
+        f"📧 **الإيميلات الخاصة بك:**\n`{emails_str}`",
+        parse_mode="Markdown",
+        reply_markup=kb
+    )
+    
+    # إرسال إشعار خاص لك كأدمن لتتمكن من حذفها من الجدول بكل سهولة
+    cat_name = "إيميلات قديمة" if cat == "cat_old" else ("إيميلات جديدة" if cat == "cat_new" else "إيميلات (7-30 يوم)")
+    admin_notification = (
+        f"🛒 **عملية شراء جديدة تمت!**\n\n"
+        f"👤 **الزبون:** {message.from_user.full_name} (`{user_id}`)\n"
+        f"📂 **الفئة:** {cat_name}\n"
+        f"📦 **الكمية:** {qty}\n\n"
+        f"📧 **الإيميلات المباعة (يرجى حذفها من الشيت):**\n`{emails_str}`"
+    )
+    try:
+        await bot.send_message(chat_id=ADMIN_ID, text=admin_notification, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Failed to send admin notification: {e}")
+
     await state.clear()
 
 @dp.message(DepositState.waiting_for_proof)
@@ -350,7 +318,7 @@ async def start_web_server():
     app.router.add_get('/', handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 10000)))
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.com.get("PORT", 10000) if hasattr(os.environ, "get") else 10000))
     await site.start()
 
 async def main():
@@ -360,4 +328,5 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
