@@ -1,6 +1,8 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher, types, F
+import os
+from aiohttp import web
+from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -8,25 +10,22 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 API_TOKEN = '8735041657:AAFVtc6d_dyvh_udzVOsk2wlkbp-KKOTvnI'
-ADMIN_ID = 7927059374  # تم وضع الـ ID الخاص بك هنا بنجاح
+ADMIN_ID = 7927059374
 ADMIN_USERNAME = "@Alaaa057"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# حالات الإدخال (FSM)
 class DepositState(StatesGroup):
     waiting_for_proof = State()
 
-# --- مخزن الإيميلات (ضع إيميلاتك الحقيقية هنا) ---
 AVAILABLE_EMAILS = [
     "user1_2026@gmail.com:Pass1234",
     "user2_2026@gmail.com:Pass5678",
     "user3_2026@gmail.com:Pass9999"
 ]
 
-# --- القوائم والأزرار ---
 def main_menu():
     btn1 = InlineKeyboardButton(text="📧 قائمة الإيميلات والمخزن", callback_data="list_emails")
     btn2 = InlineKeyboardButton(text="💳 طرق الدفع والشحن", callback_data="payment_methods")
@@ -141,12 +140,10 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         
     await callback.answer()
 
-# استقبال رقم العملية أو الإشعار من الزبون
 @dp.message(DepositState.waiting_for_proof)
 async def process_proof(message: types.Message, state: FSMContext):
     await state.clear()
     
-    # 1. إرسال الرسالة للزبون بالتوقيت
     user_text = (
         "⏳ **تم استلام بيانات التحويل بنجاح!**\n\n"
         "جاري التحقق من العملية وتأكيد الشحن..\n"
@@ -155,7 +152,6 @@ async def process_proof(message: types.Message, state: FSMContext):
     )
     await message.answer(user_text, parse_mode="Markdown", reply_markup=back_menu())
     
-    # 2. إرسال تفاصيل الإشعار للأدمن (عبر ID حسابك)
     try:
         admin_text = (
             f"📥 **طلب إيداع جديد!**\n\n"
@@ -170,9 +166,24 @@ async def process_proof(message: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Failed to send admin notification: {e}")
 
+# صفحة ويب وهمية لرد على UptimeRobot
+async def handle_ping(request):
+    return web.Response(text="Bot is active and running 24/7!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+
 async def main():
-    print("🚀 البوت المطور شغال...")
-    await dp.start_polling(bot)
+    print("🚀 البوت يعمل مع خادم الاستجابة لـ UptimeRobot...")
+    await bot.delete_webhook(drop_pending_updates=True)
+    await start_web_server()
+    await dp.start_polling(bot, handle_signals=False)
 
 if __name__ == '__main__':
     asyncio.run(main())
