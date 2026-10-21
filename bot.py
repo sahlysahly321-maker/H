@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import sqlite3
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -17,19 +18,99 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
+# ==================== إدارة قاعدة البيانات SQLite ====================
+DB_FILE = "store_database.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            balance REAL DEFAULT 0.0,
+            purchases_count INTEGER DEFAULT 0,
+            inviter_id INTEGER DEFAULT NULL
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS referrals (
+            inviter_id INTEGER,
+            referred_id INTEGER,
+            PRIMARY KEY (inviter_id, referred_id)
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def get_user_balance(user_id):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else 0.0
+
+def update_user_balance(user_id, amount):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    current_bal = get_user_balance(user_id)
+    new_bal = round(current_bal + amount, 2)
+    cursor.execute("INSERT INTO users (user_id, balance) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET balance = ?", (user_id, new_bal, new_bal))
+    conn.commit()
+    conn.close()
+    return new_bal
+
+def get_purchases_count(user_id):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT purchases_count FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else 0
+
+def add_purchases_count(user_id, qty):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    current_cnt = get_purchases_count(user_id)
+    new_cnt = current_cnt + qty
+    cursor.execute("INSERT INTO users (user_id, purchases_count) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET purchases_count = ?", (user_id, new_cnt, new_cnt))
+    conn.commit()
+    conn.close()
+    return new_cnt
+
+def register_invitation(user_id, inviter_id):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT inviter_id FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    if not row or row[0] is None:
+        cursor.execute("INSERT INTO users (user_id, inviter_id) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET inviter_id = ?", (user_id, inviter_id, inviter_id))
+        cursor.execute("INSERT OR IGNORE INTO referrals (inviter_id, referred_id) VALUES (?, ?)", (inviter_id, user_id))
+        conn.commit()
+    conn.close()
+
+def get_valid_referrals_count(inviter_id):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT COUNT(*) FROM referrals r
+        JOIN users u ON r.referred_id = u.user_id
+        WHERE r.inviter_id = ? AND u.purchases_count >= 1
+    ''', (inviter_id,))
+    cnt = cursor.fetchone()[0]
+    conn.close()
+    return cnt
+
+# ====================================================================
+
 class DepositState(StatesGroup):
     waiting_for_proof = State()
 
 class BuyState(StatesGroup):
     waiting_for_quantity = State()
 
-user_balances = {}
 pending_operations = {}
 admin_action_target = {}
-
-referrals = {}
-user_purchases_count = {}
-inviters = {}
 
 EMAILS_OLD = [
     "mk2915564@gmail.com:orange2006#",
@@ -39,8 +120,8 @@ EMAILS_OLD = [
 
 EMAILS_NEW = [
     "hoiphonop7@gmail.com:orange2006#",
-"franecordoba@gmail.com:orange2006#",
-    
+    "arsenyefim01@gmail.com:orange2006#",
+    "enginaltan276@gmail.com:orange2006#"
 ]
 
 EMAILS_MEDIUM = [
@@ -48,9 +129,6 @@ EMAILS_MEDIUM = [
     "kiza46809@gmail.com:orange2006#",
     "salehmardani355@gmail.com:orange2006#"
 ]
-
-def get_user_balance(user_id):
-    return user_balances.get(user_id, 0.0)
 
 def main_menu(user_id):
     bal = get_user_balance(user_id)
@@ -69,13 +147,8 @@ async def send_welcome(message: types.Message, state: FSMContext):
     
     if len(args) > 1 and args[1].isdigit():
         inviter_id = int(args[1])
-        if inviter_id != user_id and user_id not in inviters.values():
-            if user_id not in inviters:
-                inviters[user_id] = inviter_id
-                if inviter_id not in referrals:
-                    referrals[inviter_id] = []
-                if user_id not in referrals[inviter_id]:
-                    referrals[inviter_id].append(user_id)
+        if inviter_id != user_id:
+            register_invitation(user_id, inviter_id)
 
     kb, bal = main_menu(user_id)
     await message.answer(f"أهلاً بك في متجر الإيميلات الفوري! 📧✨\n\n💰 **رصيدك الحالي:** `{bal:.2f}$`\n\nاختر الخدمة من الأزرار أدناه:", parse_mode="Markdown", reply_markup=kb)
@@ -211,7 +284,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     elif data == "referral_system":
         await state.clear()
         bot_info = await bot.get_me()
-        completed_refs = len([ref for ref in referrals.get(user_id, []) if user_purchases_count.get(ref, 0) >= 1])
+        completed_refs = get_valid_referrals_count(user_id)
         ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
         await callback.message.edit_text(
@@ -278,28 +351,15 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    # تنفيذ عملية الشراء وتسليم الإيميلات
-    user_balances[user_id] -= total_cost
+    # تخصيم الرصيد من قاعدة البيانات
+    new_bal = update_user_balance(user_id, -total_cost)
+    
     purchased_emails = []
     for _ in range(qty):
         purchased_emails.append(stock.pop(0))
 
-    user_purchases_count[user_id] = user_purchases_count.get(user_id, 0) + qty
-
-    # نظام الإحالة
-    if user_purchases_count[user_id] >= 1 and user_id in inviters:
-        inviter_id = inviters[user_id]
-        valid_refs = [ref for ref in referrals.get(inviter_id, []) if user_purchases_count.get(ref, 0) >= 1]
-        if len(valid_refs) == 5:
-            user_balances[inviter_id] = get_user_balance(inviter_id) + 0.60
-            try:
-                await bot.send_message(
-                    chat_id=inviter_id,
-                    text="🎁 **تهانينا!** لقد أتم أصدقاؤك الـ 5 المدعوون عملية الشراء الأولى بنجاح.\nتمت إضافة رصيد بقيمة `0.60$` إلى حسابك كهدية إحالة! 🎉",
-                    parse_mode="Markdown"
-                )
-            except:
-                pass
+    # تحديث مشتريات المستخدم
+    add_purchases_count(user_id, qty)
 
     emails_str = "\n`.`\n".join(purchased_emails)
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
@@ -308,7 +368,7 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         f"✅ **تمت عملية الشراء بنجاح!**\n\n"
         f"📦 **الكمية:** `{qty}` إيميل\n"
         f"💰 **المبلغ المخصوم:** `{total_cost:.2f}$`\n"
-        f"💵 **الرصيد المتبقي:** `{user_balances[user_id]:.2f}$`\n\n"
+        f"💵 **الرصيد المتبقي:** `{new_bal:.2f}$`\n\n"
         f"📧 **الإيميلات الخاصة بك:**\n`{emails_str}`",
         parse_mode="Markdown",
         reply_markup=kb
@@ -356,12 +416,13 @@ async def process_admin_amount_input(message: types.Message):
         admin_action_target[ADMIN_ID] = client_id
         return
 
-    user_balances[client_id] = get_user_balance(client_id) + amount_to_add
+    # إضافة الرصيد إلى قاعدة البيانات
+    new_bal = update_user_balance(client_id, amount_to_add)
     
     try:
         await bot.send_message(
             chat_id=client_id, 
-            text=f"🎉 **تم قبول الإيداع وإضافة الرصيد بنجاح!**\n➕ المبلغ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك الحالي: `{user_balances[client_id]:.2f}$`", 
+            text=f"🎉 **تم قبول الإيداع وإضافة الرصيد بنجاح!**\n➕ المبلغ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك الحالي: `{new_bal:.2f}$`", 
             parse_mode="Markdown"
         )
     except:
@@ -382,9 +443,11 @@ async def start_web_server():
     await site.start()
 
 async def main():
+    init_db()  # إنشاء وتجهيز قاعدة البيانات عند بدء التشغيل
     await bot.delete_webhook(drop_pending_updates=True)
     await start_web_server()
     await dp.start_polling(bot, handle_signals=False)
 
 if __name__ == '__main__':
     asyncio.run(main())
+
