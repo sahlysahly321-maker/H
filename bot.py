@@ -98,6 +98,36 @@ async def send_welcome(message: types.Message, state: FSMContext):
     kb, bal = main_menu(user_id)
     await message.answer(f"أهلاً بك في متجر الإيميلات الفوري! 📧✨\n\n💰 **رصيدك الحالي:** `{bal:.2f}$`\n\nاختر الخدمة من الأزرار أدناه:", parse_mode="Markdown", reply_markup=kb)
 
+# 📢 أمر الإذاعة والإعلانات العامة لجميع المستخدمين
+@dp.message(Command("bc"))
+async def broadcast_message(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    text_to_send = message.text.replace("/bc", "").strip()
+    if not text_to_send:
+        await message.answer("⚠️ **يرجى كتابة الرسالة بعد الأمر!**\nمثال:\n`/bc أهلاً بكم، تم إضافة دفعة إيميلات جديدة!`", parse_mode="Markdown")
+        return
+
+    all_users = list(user_balances.keys())
+    if not all_users:
+        await message.answer("❌ لا يوجد مستخدمين مسجلين بالبوت بعد.")
+        return
+
+    success = 0
+    failed = 0
+    await message.answer(f"⏳ **جاري إرسال الإعلان لـ {len(all_users)} مستخدم...**", parse_mode="Markdown")
+
+    for u_id in all_users:
+        try:
+            await bot.send_message(chat_id=u_id, text=f"📢 **إعلان من الإدارة:**\n\n{text_to_send}", parse_mode="Markdown")
+            success += 1
+            await asyncio.sleep(0.05) # حماية من حظر التيليجرام لكثرة الرسائل
+        except Exception:
+            failed += 1
+
+    await message.answer(f"✅ **تم إنهاء الإذاعة بنجاح!**\n\n🎯 **وصلت لـ:** `{success}` مستخدم\n❌ **فشل الإرسال لـ:** `{failed}` (حظروا البوت)", parse_mode="Markdown")
+
 @dp.callback_query()
 async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data
