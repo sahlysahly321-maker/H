@@ -27,13 +27,14 @@ user_balances = {}
 EMAILS_OLD = [
     "mk2915564@gmail.com:orange2006#",
     "millmaize@gmail.com:orange2006#",
-    "goldendome63@gmail.com:orange2006#"
+    "goldendome63@gmail.com:orange2006#",
 ]
 
 EMAILS_NEW = [
-    "hoiphonop7@gmail.com:orange2006#",
-"arsenyefim01@gmail.com:orange2006#",
+    "hoiphonop7@gmail.com:orange2006#,
+"arsenyefim01@gmail.com:orange2006#,
 "enginaltan276@gmail.com:orange2006#",
+
 ]
 
 EMAILS_MEDIUM = [
@@ -210,8 +211,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         client_id = pending_deposits.get(dep_id)
         
         if client_id:
-            # إضافة قيمة افتراضية للشحن (مثلاً 0.60$ ثمن إيميل) أو يمكنك تعديل الرصيد
-            add_amount = 0.60 
+            add_amount = 0.60  # قيمة افتراضية للشحن أو تعدلها حسب رغبتك
             user_balances[client_id] = get_user_balance(client_id) + add_amount
             try:
                 await bot.send_message(
@@ -242,5 +242,90 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text(f"{callback.message.text}\n\n❌ **تم رفض طلب الشحن.**", parse_mode="Markdown")
 
     elif data == "referral_system":
-        bot
+        bot_info = await bot.get_me()
+        ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
+        text = (
+            f"🎁 **برنامج الإحالة والمكافآت:**\n\n"
+            f"احصل على **إيميل قديم مجاناً (0.60$)** عند دعوة 5 من أصدقائك!\n\n"
+            f"🔗 **رابط الدعوة الخاص بك:**\n`{ref_link}`"
+        )
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
+        
+    elif data == "support_info":
+        text = f"🛠 **الدعم الفني:**\nللتواصل والشحن أرسل للمالك مباشرة: {ADMIN_USERNAME}"
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
+        
+    elif data == "back_to_main":
+        await state.clear()
+        kb, bal = main_menu(user_id)
+        text = (
+            f"القائمة الرئيسية للمتجر 📧:\n\n"
+            f"💰 **رصيدك الحالي:** `{bal:.2f}$`"
+        )
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+        
+    await callback.answer()
+
+@dp.message(DepositState.waiting_for_proof)
+async def process_proof(message: types.Message, state: FSMContext):
+    await state.clear()
+    
+    user_id = message.from_user.id
+    dep_id = str(user_id)
+    pending_deposits[dep_id] = user_id
+
+    user_text = (
+        "⏳ **تم استلام بيانات التحويل بنجاح!**\n\n"
+        "جاري التحقق من التحويل وتعبئة الرصيد..\n"
+        "⏱ **سيتم إشعارك فور تعبئة الرصيد.**\n\n"
+        "شكراً لانتظارك! 🌹"
+    )
+    await message.answer(user_text, parse_mode="Markdown", reply_markup=back_menu())
+    
+    try:
+        admin_text = (
+            f"📥 **طلب شحن رصيد جديد!**\n\n"
+            f"👤 **الزبون:** {message.from_user.full_name} (@{message.from_user.username})\n"
+            f"🆔 **ID الزبون:** `{user_id}`\n\n"
+            f"📝 **بيانات العملية:**\n{message.text if message.text else 'أرسل صورة إشعار'}"
+        )
+        if message.photo:
+            await bot.send_photo(
+                chat_id=ADMIN_ID,
+                photo=message.photo[-1].file_id,
+                caption=admin_text,
+                parse_mode="Markdown",
+                reply_markup=admin_approval_menu(dep_id)
+            )
+        else:
+            await bot.send_message(
+                chat_id=ADMIN_ID,
+                text=admin_text,
+                parse_mode="Markdown",
+                reply_markup=admin_approval_menu(dep_id)
+            )
+    except Exception as e:
+        logging.error(f"Failed to send admin notification: {e}")
+
+async def handle_ping(request):
+    return web.Response(text="Bot is active and running 24/7!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+
+async def main():
+    print("🚀 البوت يعمل بانتظام...")
+    await bot.delete_webhook(drop_pending_updates=True)
+    await start_web_server()
+    await dp.start_polling(bot, handle_signals=False)
+
+if __name__ == '__main__':
+    asyncio.run(main())
+
 
