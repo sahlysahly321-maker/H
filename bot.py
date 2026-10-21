@@ -1,67 +1,71 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 
 API_TOKEN = '8735041657:AAFVtc6d_dyvh_udzVOsk2wlkbp-KKOTvnI'
+ADMIN_ID = 7927059374  # تم وضع الـ ID الخاص بك هنا بنجاح
+ADMIN_USERNAME = "@Alaaa057"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
 
-# --- مخزن الإيميلات ---
+# حالات الإدخال (FSM)
+class DepositState(StatesGroup):
+    waiting_for_proof = State()
+
+# --- مخزن الإيميلات (ضع إيميلاتك الحقيقية هنا) ---
 AVAILABLE_EMAILS = [
     "user1_2026@gmail.com:Pass1234",
     "user2_2026@gmail.com:Pass5678",
     "user3_2026@gmail.com:Pass9999"
 ]
 
-# --- القائمة الرئيسية ---
+# --- القوائم والأزرار ---
 def main_menu():
     btn1 = InlineKeyboardButton(text="📧 قائمة الإيميلات والمخزن", callback_data="list_emails")
     btn2 = InlineKeyboardButton(text="💳 طرق الدفع والشحن", callback_data="payment_methods")
     btn3 = InlineKeyboardButton(text="🎁 نظام الإحالة", callback_data="referral_system")
     btn4 = InlineKeyboardButton(text="🛠 الدعم الفني", callback_data="support_info")
-    
     return InlineKeyboardMarkup(inline_keyboard=[[btn1], [btn2], [btn3], [btn4]])
 
-# --- أزرار قائمة الإيميلات ---
 def emails_menu():
     btn_buy = InlineKeyboardButton(text="🛒 تأكيد الشراء الآن", callback_data="buy_email")
     btn_back = InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")
     return InlineKeyboardMarkup(inline_keyboard=[[btn_buy], [btn_back]])
 
-# --- أزرار طرق الدفع ---
 def payment_menu():
     btn_sham = InlineKeyboardButton(text="1️⃣ شام كاش", callback_data="pay_sham")
     btn_crypto = InlineKeyboardButton(text="2️⃣ عملات رقمية (USDT)", callback_data="pay_crypto")
     btn_back = InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")
     return InlineKeyboardMarkup(inline_keyboard=[[btn_sham], [btn_crypto], [btn_back]])
 
-# --- زر العودة مع التحقق ---
 def check_pay_menu():
     btn_check = InlineKeyboardButton(text="✅ التحقق من الدفع", callback_data="check_payment")
     btn_back = InlineKeyboardButton(text="🔙 العودة لطرق الدفع", callback_data="payment_methods")
     return InlineKeyboardMarkup(inline_keyboard=[[btn_check], [btn_back]])
 
-# --- زر العودة البسيط ---
 def back_menu():
     btn = InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")
     return InlineKeyboardMarkup(inline_keyboard=[[btn]])
 
 @dp.message(Command("start"))
-async def send_welcome(message: types.Message):
+async def send_welcome(message: types.Message, state: FSMContext):
+    await state.clear()
     await message.answer(
         "أهلاً بك في متجر الإيميلات الفوري! 📧✨\nاختر من القائمة أدناه الخدمة التي تريدها:",
         reply_markup=main_menu()
     )
 
 @dp.callback_query()
-async def handle_callbacks(callback: types.CallbackQuery):
+async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data
     
-    # قائمة الإيميلات
     if data == "list_emails":
         count = len(AVAILABLE_EMAILS)
         text = (
@@ -73,7 +77,6 @@ async def handle_callbacks(callback: types.CallbackQuery):
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=emails_menu())
         
-    # شراء إيميل
     elif data == "buy_email":
         if AVAILABLE_EMAILS:
             email_data = AVAILABLE_EMAILS.pop(0)
@@ -86,12 +89,11 @@ async def handle_callbacks(callback: types.CallbackQuery):
             text = "❌ **عذراً، المخزن فارغ حالياً!**\nيرجى التواصل مع الدعم لتعبئة المخزن."
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
         
-    # اختيار طريقة الدفع
     elif data == "payment_methods":
+        await state.clear()
         text = "💳 **اختر طريقة الدفع المناسبة لك من الأسفل:**"
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=payment_menu())
 
-    # الدفع عبر شام كاش
     elif data == "pay_sham":
         text = (
             "📌 **1️⃣ شام كاش**\n\n"
@@ -99,11 +101,10 @@ async def handle_callbacks(callback: types.CallbackQuery):
             "`18a4c2941387daeaf0256639ffc705e8`\n\n"
             "✅ **العملات المقبولة:** الدولار الأمريكي (USD) والليرة السورية (SYP)\n"
             "💱 **سعر الصرف الحالي في البوت:**\n`1 USD = 141 SYP`\n\n"
-            "⚠️ بعد إتمام التحويل اضغط على **تحقق من الدفع** ثم أرسل رقم العملية من تطبيق شام كاش."
+            "⚠️ بعد إتمام التحويل اضغط على **التحقق من الدفع** لتسجيل رقم العملية."
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=check_pay_menu())
 
-    # الدفع عبر العملات الرقمية
     elif data == "pay_crypto":
         text = (
             "📌 **2️⃣ عملات رقمية (USDT)**\n\n"
@@ -118,16 +119,11 @@ async def handle_callbacks(callback: types.CallbackQuery):
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=check_pay_menu())
 
-    # زر التحقق من الدفع
     elif data == "check_payment":
-        text = (
-            "📩 **تحقق من عملية الدفع:**\n\n"
-            "يرجى إرسال رقم العملية (أو صورة عن إشعار التحويل) إلى حساب الدعم الفني ليتم تأكيد إيداعك وإضافة الرصيد فوراً.\n\n"
-            "🛠 **للتواصل مع الدعم:** أرسل إشعارك هنا."
-        )
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
+        await state.set_state(DepositState.waiting_for_proof)
+        text = "📩 **يرجى كتابة رقم العملية (أو إرسال صورة إشعار التحويل) الآن في المحادثة:**"
+        await callback.message.edit_text(text, parse_mode="Markdown")
 
-    # نظام الإحالة
     elif data == "referral_system":
         bot_info = await bot.get_me()
         user_id = callback.from_user.id
@@ -135,16 +131,44 @@ async def handle_callbacks(callback: types.CallbackQuery):
         text = f"🎁 **برنامج الإحالة:**\n\nشارك رابط الدعوة الخاص بك وحصل على مكافآت عند إرساله لأصدقائك:\n\n`{ref_link}`"
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
         
-    # الدعم الفني
     elif data == "support_info":
-        text = "🛠 **الدعم الفني:**\nللتواصل والشحن أرسل للمالك مباشرة."
+        text = f"🛠 **الدعم الفني:**\nللتواصل والشحن أرسل للمالك مباشرة: {ADMIN_USERNAME}"
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
         
-    # العودة للقائمة الرئيسية
     elif data == "back_to_main":
+        await state.clear()
         await callback.message.edit_text("القائمة الرئيسية للمتجر 📧:", reply_markup=main_menu())
         
     await callback.answer()
+
+# استقبال رقم العملية أو الإشعار من الزبون
+@dp.message(DepositState.waiting_for_proof)
+async def process_proof(message: types.Message, state: FSMContext):
+    await state.clear()
+    
+    # 1. إرسال الرسالة للزبون بالتوقيت
+    user_text = (
+        "⏳ **تم استلام بيانات التحويل بنجاح!**\n\n"
+        "جاري التحقق من العملية وتأكيد الشحن..\n"
+        "⏱ **سيتم إضافة الرصيد إلى حسابك خلال 5 إلى 15 دقيقة.**\n\n"
+        "شكراً لانتظارك! 🌹"
+    )
+    await message.answer(user_text, parse_mode="Markdown", reply_markup=back_menu())
+    
+    # 2. إرسال تفاصيل الإشعار للأدمن (عبر ID حسابك)
+    try:
+        admin_text = (
+            f"📥 **طلب إيداع جديد!**\n\n"
+            f"👤 **الزبون:** {message.from_user.full_name} (@{message.from_user.username})\n"
+            f"🆔 **ID الزبون:** `{message.from_user.id}`\n\n"
+            f"📝 **بيانات العملية / النص المرسل:**\n{message.text if message.text else 'أرسل صورة إشعار'}"
+        )
+        if message.photo:
+            await bot.send_photo(chat_id=ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_text, parse_mode="Markdown")
+        else:
+            await bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Failed to send admin notification: {e}")
 
 async def main():
     print("🚀 البوت المطور شغال...")
@@ -152,3 +176,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
