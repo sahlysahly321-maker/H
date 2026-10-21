@@ -31,13 +31,15 @@ EMAILS_OLD = [
 ]
 
 EMAILS_NEW = [
-    "new_user1_2026@gmail.com:Pass1234",
-    "new_user2_2026@gmail.com:Pass5678"
+    "hoiphonop7@gmail.com:orange2006#",
+"arsenyefim01@gmail.com:orange2006#"
+"enginaltan276@gmail.com:orange2006#"  
 ]
 
 EMAILS_MEDIUM = [
-    "med_user1_2026@gmail.com:Pass1234",
-    "med_user2_2026@gmail.com:Pass5678"
+    "fathserifalkadi@gmail.com:orange2006#",
+"kiza46809@gmail.com:orange2006#"
+"salehmardani355@gmail.com:orange2006#"
 ]
 
 # طلبات الشحن المعلقة {deposit_id: user_id}
