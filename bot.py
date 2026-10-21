@@ -20,6 +20,9 @@ dp = Dispatcher(storage=MemoryStorage())
 class DepositState(StatesGroup):
     waiting_for_proof = State()
 
+class BuyState(StatesGroup):
+    waiting_for_quantity = State()
+
 user_balances = {}
 pending_operations = {}
 admin_action_target = {}
@@ -83,6 +86,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     
     if data == "list_emails":
+        await state.clear()
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="1️⃣ إيميلات قديمة (0.6$)", callback_data="cat_old")],
             [InlineKeyboardButton(text="2️⃣ إيميلات جديدة (0.35$)", callback_data="cat_new")],
@@ -92,83 +96,66 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text("📦 **اختر فئة الإيميلات المطلوبة:**", parse_mode="Markdown", reply_markup=kb)
         
     elif data in ["cat_old", "cat_new", "cat_medium"]:
+        await state.clear()
         if data == "cat_old":
-            cat_name = "إيميلات قديمة"
             price = 0.60
             count = len(EMAILS_OLD)
             details = (
-                "📌 **إيميلات قديمة**\n"
-                "💵 **السعر:** 0.6$\n"
-                "📊 **المتوفر:** `{count}` إيميل\n"
-                "🗓 **تاريخ الإنشاء:** من نصف سنة حتى 5 سنين\n"
-                "🛡 **الكفالة:** مدة يومين من تاريخ الشراء\n"
-                "⚠️ **تنبيه:** يجب إدخالهم أول مرة بإنترنت سوري، وفي حال طلب الإيميل تحقق يرجى التواصل مع الدعم لإكمالها فوراً."
-            ).format(count=count)
+                f"📌 **إيميلات قديمة**\n"
+                f"💵 **السعر لكل منتج:** `0.60 USDT`\n"
+                f"📊 **الكمية المتاحة:** `{count}`\n"
+                f"🗓 **تاريخ الإنشاء:** من نصف سنة حتى 5 سنين\n"
+                f"🛡 **الكفالة:** مدة يومين من تاريخ الشراء\n"
+                f"⚠️ **تنبيه:** يجب إدخالهم أول مرة بإنترنت سوري، وفي حال طلب الإيميل تحقق يرجى التواصل مع الدعم لإكمالها فوراً."
+            )
         elif data == "cat_new":
-            cat_name = "إيميلات جديدة"
             price = 0.35
             count = len(EMAILS_NEW)
             details = (
-                "📌 **إيميلات جديدة**\n"
-                "💵 **السعر:** 0.35$\n"
-                "📊 **المتوفر:** `{count}` إيميل\n"
-                "🛡 **الكفالة:** 24 ساعة من تاريخ الشراء"
-            ).format(count=count)
+                f"📌 **إيميلات جديدة**\n"
+                f"💵 **السعر لكل منتج:** `0.35 USDT`\n"
+                f"📊 **الكمية المتاحة:** `{count}`\n"
+                f"🛡 **الكفالة:** 24 ساعة من تاريخ الشراء"
+            )
         else:
-            cat_name = "إيميلات (7-30 يوم)"
             price = 0.60
             count = len(EMAILS_MEDIUM)
             details = (
-                "📌 **إيميلات (7-30 يوم)**\n"
-                "💵 **السعر:** 0.6$\n"
-                "📊 **المتوفر:** `{count}` إيميل\n"
-                "🗓 **تاريخ الإنشاء:** من (7 - 30 أيام)\n"
-                "🛡 **الكفالة:** يومين من تاريخ الشراء"
-            ).format(count=count)
+                f"📌 **إيميلات (7-30 يوم)**\n"
+                f"💵 **السعر لكل منتج:** `0.60 USDT`\n"
+                f"📊 **الكمية المتاحة:** `{count}`\n"
+                f"🗓 **تاريخ الإنشاء:** من (7 - 30 أيام)\n"
+                f"🛡 **الكفالة:** يومين من تاريخ الشراء"
+            )
         
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🛒 شراء الآن بالرصيد", callback_data=f"buy_{data}")],
+            [InlineKeyboardButton(text="🛒 شراء إيميلات", callback_data=f"buy_req_{data}")],
             [InlineKeyboardButton(text="🔙 العودة لفئات الإيميلات", callback_data="list_emails")]
         ])
-        await callback.message.edit_text(f"{details}\n\nاضغط للشراء المباشر:", parse_mode="Markdown", reply_markup=kb)
+        await callback.message.edit_text(f"{details}\n\nاضغط على **شراء إيميلات** لتحديد الكمية:", parse_mode="Markdown", reply_markup=kb)
 
-    elif data.startswith("buy_"):
-        cat = data.replace("buy_", "")
-        price = 0.35 if cat == "cat_new" else 0.60
-        bal = get_user_balance(user_id)
-        
-        if bal < price:
-            await callback.answer(f"❌ رصيدك غير كافٍ ({bal:.2f}$)! يرجى شحن الرصيد.", show_alert=True)
-            return
-            
+    elif data.startswith("buy_req_"):
+        cat = data.replace("buy_req_", "")
         stock = EMAILS_OLD if cat == "cat_old" else (EMAILS_NEW if cat == "cat_new" else EMAILS_MEDIUM)
-        if not stock:
-            await callback.answer("❌ عذراً، هذه الفئة نفدت من المخزن!", show_alert=True)
+        max_count = len(stock)
+        
+        if max_count == 0:
+            await callback.answer("❌ عذراً، هذه الفئة نفدت من المخزن حالياً!", show_alert=True)
             return
-            
-        user_balances[user_id] -= price
-        email_data = stock.pop(0)
-        
-        user_purchases_count[user_id] = user_purchases_count.get(user_id, 0) + 1
-        
-        if user_purchases_count[user_id] == 1 and user_id in inviters:
-            inviter_id = inviters[user_id]
-            valid_refs = [ref for ref in referrals.get(inviter_id, []) if user_purchases_count.get(ref, 0) >= 1]
-            if len(valid_refs) == 5:
-                user_balances[inviter_id] = get_user_balance(inviter_id) + 0.60
-                try:
-                    await bot.send_message(
-                        chat_id=inviter_id,
-                        text="🎁 **تهانينا!** لقد أتم أصدقاؤك الـ 5 المدعوون عملية الشراء الأولى بنجاح.\nتمت إضافة رصيد بقيمة `0.60$` إلى حسابك كهدية إحالة! 🎉",
-                        parse_mode="Markdown"
-                    )
-                except:
-                    pass
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-        await callback.message.edit_text(f"✅ **تمت عملية الشراء بنجاح!**\n\n💰 **المخصوم:** `{price}$`\n💵 **المتبقي:** `{user_balances[user_id]:.2f}$`\n\n📧 **الإيميل الخاص بك:**\n`{email_data}`", parse_mode="Markdown", reply_markup=kb)
+        await state.update_data(selected_cat=cat)
+        await state.set_state(BuyState.waiting_for_quantity)
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 إلغاء والعودة", callback_data="list_emails")]])
+        await callback.message.edit_text(
+            f"📥 **يرجى إدخال الكمية المطلوبة:**\n"
+            f"اكتب رقماً من `1` إلى `{max_count}` (العدد المتوفر حالياً بالمتجر):",
+            parse_mode="Markdown",
+            reply_markup=kb
+        )
 
     elif data == "payment_methods":
+        await state.clear()
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="1️⃣ شام كاش", callback_data="pay_sham")],
             [InlineKeyboardButton(text="2️⃣ عملات رقمية (USDT)", callback_data="pay_crypto")],
@@ -222,6 +209,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text(f"{callback.message.text}\n\n❌ **تم رفض الطلب.**", parse_mode="Markdown")
 
     elif data == "referral_system":
+        await state.clear()
         bot_info = await bot.get_me()
         completed_refs = len([ref for ref in referrals.get(user_id, []) if user_purchases_count.get(ref, 0) >= 1])
         ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
@@ -236,6 +224,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         )
 
     elif data == "support_info":
+        await state.clear()
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
         await callback.message.edit_text(f"🛠 **الدعم الفني:**\nتواصل مع المالك: {ADMIN_USERNAME}", parse_mode="Markdown", reply_markup=kb)
 
@@ -245,6 +234,86 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text(f"القائمة الرئيسية للمتجر 📧:\n\n💰 **رصيدك الحالي:** `{bal:.2f}$`", parse_mode="Markdown", reply_markup=kb)
         
     await callback.answer()
+
+@dp.message(BuyState.waiting_for_quantity)
+async def process_buy_quantity(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    user_data = await state.get_data()
+    cat = user_data.get("selected_cat")
+    
+    if not cat:
+        await state.clear()
+        await message.answer("❌ حدث خطأ، يرجى المحاولة من جديد.")
+        return
+
+    stock = EMAILS_OLD if cat == "cat_old" else (EMAILS_NEW if cat == "cat_new" else EMAILS_MEDIUM)
+    price = 0.35 if cat == "cat_new" else 0.60
+    max_count = len(stock)
+
+    if not message.text.isdigit():
+        await message.answer(f"❌ يرجى كتابة رقم صحيح للكمية (مثال: `1` إلى `{max_count}`):", parse_mode="Markdown")
+        return
+
+    qty = int(message.text.strip())
+
+    if qty <= 0:
+        await message.answer("❌ يجب إدخال كمية تساوي 1 أو أكثر.")
+        return
+
+    if qty > max_count:
+        await message.answer(f"❌ الكمية المطلوبة ({qty}) أكبر من المتوفر حالياً في المخزن ({max_count}). يرجى كتابة كمية أقل.")
+        return
+
+    total_cost = round(qty * price, 2)
+    bal = get_user_balance(user_id)
+
+    if bal < total_cost:
+        await message.answer(
+            f"❌ **رصيدك غير كافٍ!**\n\n"
+            f"💰 تكلفة الشراء لـ `{qty}` إيميل: `{total_cost:.2f}$`\n"
+            f"💵 رصيدك الحالي: `{bal:.2f}$`\n\n"
+            f"يرجى شحن حسابك أولاً.",
+            parse_mode="Markdown"
+        )
+        await state.clear()
+        return
+
+    # تنفيذ عملية الشراء وتسليم الإيميلات
+    user_balances[user_id] -= total_cost
+    purchased_emails = []
+    for _ in range(qty):
+        purchased_emails.append(stock.pop(0))
+
+    user_purchases_count[user_id] = user_purchases_count.get(user_id, 0) + qty
+
+    # نظام الإحالة
+    if user_purchases_count[user_id] >= 1 and user_id in inviters:
+        inviter_id = inviters[user_id]
+        valid_refs = [ref for ref in referrals.get(inviter_id, []) if user_purchases_count.get(ref, 0) >= 1]
+        if len(valid_refs) == 5:
+            user_balances[inviter_id] = get_user_balance(inviter_id) + 0.60
+            try:
+                await bot.send_message(
+                    chat_id=inviter_id,
+                    text="🎁 **تهانينا!** لقد أتم أصدقاؤك الـ 5 المدعوون عملية الشراء الأولى بنجاح.\nتمت إضافة رصيد بقيمة `0.60$` إلى حسابك كهدية إحالة! 🎉",
+                    parse_mode="Markdown"
+                )
+            except:
+                pass
+
+    emails_str = "\n`.`\n".join(purchased_emails)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
+    
+    await message.answer(
+        f"✅ **تمت عملية الشراء بنجاح!**\n\n"
+        f"📦 **الكمية:** `{qty}` إيميل\n"
+        f"💰 **المبلغ المخصوم:** `{total_cost:.2f}$`\n"
+        f"💵 **الرصيد المتبقي:** `{user_balances[user_id]:.2f}$`\n\n"
+        f"📧 **الإيميلات الخاصة بك:**\n`{emails_str}`",
+        parse_mode="Markdown",
+        reply_markup=kb
+    )
+    await state.clear()
 
 @dp.message(DepositState.waiting_for_proof)
 async def process_proof(message: types.Message, state: FSMContext):
