@@ -1,8 +1,6 @@
 import asyncio
 import logging
 import os
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -15,37 +13,21 @@ API_TOKEN = '8735041657:AAFVtc6d_dyvh_udzVOsk2wlkbp-KKOTvnI'
 ADMIN_ID = 7927059374
 ADMIN_USERNAME = "@Alaaa057"
 
-# إعداد Google Sheets
-SPREADSHEET_ID = "1ZKVQTAMGb70ptWjj5eE9QsHg2Fyn-P2UeSiyUKi5Wdc"
-
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-def get_sheet_connection():
-    try:
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        # استخدام المتغيرات البيئية أو الاتصال المباشر
-        creds_json = os.environ.get("GOOGLE_CREDENTIALS")
-        if creds_json:
-            creds_dict = json.loads(creds_json)
-            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-            client = gspread.authorize(creds)
-            return client.open_by_key(SPREADSHEET_ID).worksheet("Users")
-    except Exception as e:
-        logging.error(f"Sheet connection error: {e}")
-    return None
+# قاموس لحفظ أرصدة الزبائن والمشتريات
+user_balances = {}
+user_purchases = {}
 
 def get_user_balance(user_id):
-    # جلب الرصيد من الذاكرة السحابية المؤقتة لتسريع البوت، ويمكن ربطه لاحقاً بالشيت مباشرة
-    return user_balances_cache.get(user_id, 0.0)
-
-user_balances_cache = {}
+    return user_balances.get(user_id, 0.0)
 
 def update_user_balance(user_id, amount):
-    current = user_balances_cache.get(user_id, 0.0)
+    current = get_user_balance(user_id)
     new_bal = round(current + amount, 2)
-    user_balances_cache[user_id] = new_bal
+    user_balances[user_id] = new_bal
     return new_bal
 
 class DepositState(StatesGroup):
@@ -60,7 +42,7 @@ admin_action_target = {}
 EMAILS_OLD = [
     "mk2915564@gmail.com:orange2006#",
     "millmaize@gmail.com:orange2006#",
-    "goldendome63@gmail.com:orange2006#",
+    "goldendome63@gmail.com:orange2006#"
 ]
 
 EMAILS_NEW = [
@@ -88,8 +70,8 @@ def main_menu(user_id):
 async def send_welcome(message: types.Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
-    if user_id not in user_balances_cache:
-        user_balances_cache[user_id] = 0.0
+    if user_id not in user_balances:
+        user_balances[user_id] = 0.0
 
     kb, bal = main_menu(user_id)
     await message.answer(f"أهلاً بك في متجر الإيميلات الفوري! 📧✨\n\n💰 **رصيدك الحالي:** `{bal:.2f}$`\n\nاختر الخدمة من الأزرار أدناه:", parse_mode="Markdown", reply_markup=kb)
@@ -113,17 +95,17 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await state.clear()
         if data == "cat_old":
             count = len(EMAILS_OLD)
-            details = f"📌 **إيميلات قديمة**\n💵 **السعر لكل منتج:** `0.60 USDT`\n📊 **الكمية المتاحة:** `{count}`\n🛡 **الكفالة:** مدة يومين"
+            details = f"📌 **إيميلات قديمة**\n💵 **السعر:** `0.60$`\n📊 **المتوفر:** `{count}`\n🛡 **الكفالة:** يومين"
         elif data == "cat_new":
             count = len(EMAILS_NEW)
-            details = f"📌 **إيميلات جديدة**\n💵 **السعر لكل منتج:** `0.35 USDT`\n📊 **الكمية المتاحة:** `{count}`\n🛡 **الكفالة:** 24 ساعة"
+            details = f"📌 **إيميلات جديدة**\n💵 **السعر:** `0.35$`\n📊 **المتوفر:** `{count}`\n🛡 **الكفالة:** 24 ساعة"
         else:
             count = len(EMAILS_MEDIUM)
-            details = f"📌 **إيميلات (7-30 يوم)**\n💵 **السعر لكل منتج:** `0.60 USDT`\n📊 **الكمية المتاحة:** `{count}`\n🛡 **الكفالة:** يومين"
+            details = f"📌 **إيميلات (7-30 يوم)**\n💵 **السعر:** `0.60$`\n📊 **المتوفر:** `{count}`\n🛡 **الكفالة:** يومين"
         
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🛒 شراء إيميلات", callback_data=f"buy_req_{data}")],
-            [InlineKeyboardButton(text="🔙 العودة لفئات الإيميلات", callback_data="list_emails")]
+            [InlineKeyboardButton(text="🔙 العودة", callback_data="list_emails")]
         ])
         await callback.message.edit_text(f"{details}\n\nاضغط على **شراء إيميلات** لتحديد الكمية:", parse_mode="Markdown", reply_markup=kb)
 
@@ -133,14 +115,14 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         max_count = len(stock)
         
         if max_count == 0:
-            await callback.answer("❌ عذراً، هذه الفئة نفدت من المخزن حالياً!", show_alert=True)
+            await callback.answer("❌ عذراً، هذه الفئة نفدت حالياً!", show_alert=True)
             return
 
         await state.update_data(selected_cat=cat)
         await state.set_state(BuyState.waiting_for_quantity)
         
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 إلغاء والعودة", callback_data="list_emails")]])
-        await callback.message.edit_text(f"📥 **يرجى إدخال الكمية المطلوبة (من 1 إلى {max_count}):**", parse_mode="Markdown", reply_markup=kb)
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 إلغاء", callback_data="list_emails")]])
+        await callback.message.edit_text(f"📥 **أدخل الكمية المطلوبة (من 1 إلى {max_count}):**", parse_mode="Markdown", reply_markup=kb)
 
     elif data == "payment_methods":
         await state.clear()
@@ -149,21 +131,21 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="2️⃣ عملات رقمية (USDT)", callback_data="pay_crypto")],
             [InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]
         ])
-        await callback.message.edit_text(f"💳 **شحن الرصيد وطرق الدفع:**\n\n💰 **رصيدك الحالي:** `{get_user_balance(user_id):.2f}$`", parse_mode="Markdown", reply_markup=kb)
+        await callback.message.edit_text(f"💳 **طرق الدفع والشحن:**\n\n💰 **رصيدك الحالي:** `{get_user_balance(user_id):.2f}$`", parse_mode="Markdown", reply_markup=kb)
 
     elif data == "pay_sham":
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ إرسال رقم العملية", callback_data="check_payment")],
             [InlineKeyboardButton(text="🔙 العودة", callback_data="payment_methods")]
         ])
-        await callback.message.edit_text("📌 **شام كاش:**\nالعنوان: `18a4c2941387daeaf0256639ffc705e8`\n\nاضغط أدناه لإرسال رقم العملية فقط.", parse_mode="Markdown", reply_markup=kb)
+        await callback.message.edit_text("📌 **شام كاش:**\nالعنوان: `18a4c2941387daeaf0256639ffc705e8`\n\nاضغط أدناه لإرسال رقم العملية.", parse_mode="Markdown", reply_markup=kb)
 
     elif data == "pay_crypto":
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ إرسال رقم العملية", callback_data="check_payment")],
             [InlineKeyboardButton(text="🔙 العودة", callback_data="payment_methods")]
         ])
-        await callback.message.edit_text("📌 **USDT:**\nBEP20: `0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\nاضغط أدناه لإرسال رقم العملية فقط.", parse_mode="Markdown", reply_markup=kb)
+        await callback.message.edit_text("📌 **USDT:**\nBEP20: `0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\nاضغط أدناه لإرسال رقم العملية.", parse_mode="Markdown", reply_markup=kb)
 
     elif data == "check_payment":
         await state.set_state(DepositState.waiting_for_proof)
@@ -172,7 +154,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     elif data.startswith("adm_app_"):
         client_id = int(data.replace("adm_app_", ""))
         admin_action_target[ADMIN_ID] = client_id
-        await callback.message.answer("✍️ **أرسل الآن المبلغ بالدولار لإضافته لرصيد الزبون:**", parse_mode="Markdown")
+        await callback.message.answer("✍️ **أرسل المبلغ بالدولار لإضافته للزبون:**", parse_mode="Markdown")
 
     elif data.startswith("adm_rej_"):
         client_id = int(data.replace("adm_rej_", ""))
@@ -297,6 +279,7 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
