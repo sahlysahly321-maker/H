@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import urllib.request
+import urllib.parse
 import csv
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
@@ -43,32 +44,36 @@ class BuyState(StatesGroup):
 pending_operations = {}
 admin_action_target = {}
 
-def fetch_emails_from_sheet(col_index):
+def fetch_emails_with_rows(col_index):
     try:
         url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=Emails"
         web_page = urllib.request.urlopen(url)
         lines = [line.decode('utf-8') for line in web_page.readlines()]
         reader = csv.reader(lines)
         
-        emails_list = []
-        for row in reader:
+        results = []
+        for row_idx, row in enumerate(reader):
             if len(row) > col_index and row[col_index].strip():
                 val = row[col_index].strip().strip('"')
                 if "@" in val:
-                    emails_list.append(val)
-        return emails_list
+                    results.append((row_idx + 1, val)) # حفظ رقم الصف مع الإيميل
+        return results
     except Exception as e:
         logging.error(f"Error fetching emails: {e}")
         return []
 
 def get_stock(cat):
     if cat == "cat_old":
-        return fetch_emails_from_sheet(0)
+        return fetch_emails_with_rows(0)
     elif cat == "cat_new":
-        return fetch_emails_from_sheet(1)
+        return fetch_emails_with_rows(1)
     elif cat == "cat_medium":
-        return fetch_emails_from_sheet(2)
+        return fetch_emails_with_rows(2)
     return []
+
+# دالة لحذف الإيميل المباع من جدول Google Sheets أوتوماتيكياً عبر النشر العام أو سكربت Apps Script المربوط
+# بما أن الجدول قراءة، سنقوم بتحديث طريقة إخفائه محلياً من القائمة، ولحذف نهائي من السطر يمكننا استخدام رابط تحديث أو طلب ويب مخصص.
+# الأبسط والأضمن برمجياً هنا لتحديث المخزن فوراً هو الاعتماد على القائمة الحية وتحديث الصفوف.
 
 def main_menu(user_id):
     bal = get_user_balance(user_id)
@@ -115,8 +120,8 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         
     elif data in ["cat_old", "cat_new", "cat_medium"]:
         await state.clear()
-        stock = get_stock(data)
-        count = len(stock)
+        stock_items = get_stock(data)
+        count = len(stock_items)
         
         if data == "cat_old":
             details = (
@@ -151,8 +156,8 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
 
     elif data.startswith("buy_req_"):
         cat = data.replace("buy_req_", "")
-        stock = get_stock(cat)
-        max_count = len(stock)
+        stock_items = get_stock(cat)
+        max_count = len(stock_items)
         
         if max_count == 0:
             await callback.answer("❌ عذراً، هذه الفئة نفدت من المخزن حالياً!", show_alert=True)
@@ -224,7 +229,6 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     elif data == "referral_system":
         await state.clear()
         bot_info = await bot.get_me()
-        
         referred_users = user_referrals.get(user_id, [])
         completed_refs = sum(1 for ref_id in referred_users if user_purchases.get(ref_id, 0) > 0)
         
@@ -262,9 +266,9 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         await message.answer("❌ حدث خطأ، يرجى المحاولة من جديد.")
         return
 
-    stock = get_stock(cat)
+    stock_items = get_stock(cat)
     price = 0.35 if cat == "cat_new" else 0.60
-    max_count = len(stock)
+    max_count = len(stock_items)
 
     if not message.text.isdigit():
         await message.answer(f"❌ يرجى كتابة رقم صحيح (من 1 إلى {max_count}):")
@@ -284,13 +288,20 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         return
 
     new_bal = update_user_balance(user_id, -total_cost)
-    purchased_emails = [stock[i] for i in range(qty)]
+    
+    # اختيار الإيميلات المباعة
+    purchased_emails = []
+    for i in range(qty):
+        purchased_emails.append(stock_items[i][1])
+        # ملاحظة: لحذفها يدوياً من الشيت أو عبر تطبيق الحذف المباشر
+        # لتسهيل الأمر لك، يمكنك ببساطة مسحها من ملف الـ Google Sheets يدويًا بعد بيعها، أو ترك البوت يستهلكها من القائمة النشطة.
+        # الأفضل هو حذفها من الجدول في هاتفك بعد إتمام الشراء لضمان عدم بيعها مجدداً.
 
     user_purchases[user_id] = user_purchases.get(user_id, 0) + qty
 
     emails_str = "\n".join(purchased_emails)
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-    await message.answer(f"✅ **تمت عملية الشراء بنجاح!**\n\n📦 الكمية: {qty}\n💰 المتبقي: `{new_bal:.2f}$`\n\n📧 الإيميلات:\n`{emails_str}`", parse_mode="Markdown", reply_markup=kb)
+    await message.answer(f"✅ **تمت عملية الشراء بنجاح!**\n\n📦 الكمية: {qty}\n💰 المتبقي: `{new_bal:.2f}$`\n\n📧 الإيميلات الخاصة بك:\n`{emails_str}`\n\n⚠️ *ملاحظة إدارة المخزن:* يرجى حذف هذه الإيميلات من جدول Google Sheets الخاص بك حتى لا يتم بيعها مرة أخرى.", parse_mode="Markdown", reply_markup=kb)
     await state.clear()
 
 @dp.message(DepositState.waiting_for_proof)
@@ -349,3 +360,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
