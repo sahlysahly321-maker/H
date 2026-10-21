@@ -166,7 +166,6 @@ async def process_proof(message: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Failed to send admin notification: {e}")
 
-# صفحة ويب وهمية لرد على UptimeRobot
 async def handle_ping(request):
     return web.Response(text="Bot is active and running 24/7!")
 
@@ -180,11 +179,7 @@ async def start_web_server():
     await site.start()
 
 async def main():
-    print("🚀 البوت يعمل مع خادم الاستجابة لـ UptimeRobot...")
+    print("🚀 البوت يعمل مع خادم الاستجابة...")
     await bot.delete_webhook(drop_pending_updates=True)
     await start_web_server()
-    await dp.start_polling(bot, handle_signals=False)
-
-if __name__ == '__main__':
-    asyncio.run(main())
-
+    await dp
