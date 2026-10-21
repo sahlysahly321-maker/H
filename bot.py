@@ -177,7 +177,15 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         bot_info = await bot.get_me()
         user_id = callback.from_user.id
         ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
-        text = f"🎁 **برنامج الإحالة:**\n\nشارك رابط الدعوة الخاص بك وحصل على مكافآت عند إرساله لأصدقائك:\n\n`{ref_link}`"
+        text = (
+            f"🎁 **برنامج الإحالة والمكافآت:**\n\n"
+            f"احصل على **إيميل مجاني** عند دعوة 5 من أصدقائك!\n\n"
+            f"📌 **الشروط:**\n"
+            f"1️⃣ يجب أن يسجل الصديق في البوت عبر رابطك الخاص.\n"
+            f"2️⃣ يجب أن يقوم الصديق بإتمام **عملية شراء واحدة على الأقل** من المتجر.\n\n"
+            f"🔗 **رابط الدعوة الخاص بك:**\n`{ref_link}`\n\n"
+            f"📥 *عند اكتمال الـ 5 إحالات المؤهلة، تواصل مع الدعم الفني لاستلام إيميلك المجاني فوراً!*"
+        )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
         
     elif data == "support_info":
