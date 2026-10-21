@@ -20,11 +20,11 @@ dp = Dispatcher(storage=MemoryStorage())
 class DepositState(StatesGroup):
     waiting_for_proof = State()
 
-# مخازن الإيميلات حسب الفئات
+# مخازن الإيميلات
 EMAILS_OLD = [
     "mk2915564@gmail.com:orange2006#",
-"millmaize@gmail.com:orange2006#",
-"goldendome63@gmail.com:orange2006#",
+    "millmaize@gmail.com:orange2006#",
+    "goldendome63@gmail.com:orange2006#",
 ]
 
 EMAILS_NEW = [
@@ -38,6 +38,9 @@ EMAILS_MEDIUM = [
 "kiza46809@gmail.com:orange2006#",
 "salehmardani355@gmail.com:orange2006#",
 ]
+
+# ذاكرة مؤقتة لطلبات الشراء
+pending_deposits = {}
 
 def main_menu():
     btn1 = InlineKeyboardButton(text="📧 قائمة الإيميلات والمخزن", callback_data="list_emails")
@@ -73,6 +76,11 @@ def back_menu():
     btn = InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")
     return InlineKeyboardMarkup(inline_keyboard=[[btn]])
 
+def admin_approval_menu(deposit_id):
+    btn_approve = InlineKeyboardButton(text="✅ تأكيد وإرسال إيميل (قديم)", callback_data=f"adm_app_old_{deposit_id}")
+    btn_reject = InlineKeyboardButton(text="❌ رفض الطلب", callback_data=f"adm_rej_{deposit_id}")
+    return InlineKeyboardMarkup(inline_keyboard=[[btn_approve], [btn_reject]])
+
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message, state: FSMContext):
     await state.clear()
@@ -84,6 +92,7 @@ async def send_welcome(message: types.Message, state: FSMContext):
 @dp.callback_query()
 async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data
+    user_id = callback.from_user.id
     
     if data == "list_emails":
         text = "📦 **يرجى اختيار فئة الإيميلات المطلوبة من القائمة أدناه:**"
@@ -97,8 +106,6 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             f"📅 **العمر:** تاريخ إنشاء من نصف سنة إلى 5 سنين\n"
             f"📊 **المتوفر:** `{count}` إيميل\n"
             f"🛡 **الكفالة:** لمدة يومين من تاريخ الشراء\n\n"
-            f"⚠️ **ملاحظة هامة:** يجب إضافتها أول مرة على إنترنت سوري.\n"
-            f"في حال طلب الإيميل تحقق، يرجى التواصل مع الدعم وسنكمل عملية التحقق فوراً.\n\n"
             f"👇 اضغط على **تأكيد الشراء الآن** للشراء:"
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=buy_menu("old"))
@@ -125,22 +132,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             f"👇 اضغط على **تأكيد الشراء الآن** للشراء:"
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=buy_menu("medium"))
-        
-    elif data.startswith("buy_"):
-        cat = data.split("_")[1]
-        target_list = EMAILS_OLD if cat == "old" else (EMAILS_NEW if cat == "new" else EMAILS_MEDIUM)
-        
-        if target_list:
-            email_data = target_list.pop(0)
-            text = (
-                f"✅ **تم الشراء بنجاح!**\n\n"
-                f"📧 **بيانات الإيميل:**\n`{email_data}`\n\n"
-                f"*اضغط على النص أعلاه لنسخه مباشرة.*"
-            )
-        else:
-            text = "❌ **عذراً، هذه الفئة فارغة حالياً!**\nيرجى التواصل مع الدعم لتعبئة المخزن."
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
-        
+
     elif data == "payment_methods":
         await state.clear()
         text = "💳 **اختر طريقة الدفع المناسبة لك من الأسفل:**"
@@ -160,13 +152,8 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     elif data == "pay_crypto":
         text = (
             "📌 **2️⃣ عملات رقمية (USDT)**\n\n"
-            "🔹 **USDT (BEP20):**\n"
-            "عنوان الاستقبال:\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n"
-            "⚠️ *الحد الأدنى للإيداع 0.2 USDT*\n\n"
-            "───────────────────\n\n"
-            "🔹 **USDT (TRC20):**\n"
-            "عنوان الاستقبال:\n`TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx`\n"
-            "⚠️ *الحد الأدنى للإيداع 0.2 USDT*\n\n"
+            "🔹 **USDT (BEP20):**\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\n"
+            "🔹 **USDT (TRC20):**\n`TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx`\n\n"
             "⚠️ أرسل العملية ثم اضغط على زر **التحقق من الدفع**."
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=check_pay_menu())
@@ -176,18 +163,45 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         text = "📩 **يرجى كتابة رقم العملية (أو إرسال صورة إشعار التحويل) الآن في المحادثة:**"
         await callback.message.edit_text(text, parse_mode="Markdown")
 
+    elif data.startswith("adm_app_old_"):
+        dep_id = data.replace("adm_app_old_", "")
+        client_id = pending_deposits.get(dep_id)
+        
+        if EMAILS_OLD:
+            email_data = EMAILS_OLD.pop(0)
+            if client_id:
+                try:
+                    await bot.send_message(
+                        chat_id=client_id,
+                        text=f"✅ **تم تأكيد إيداعك بنجاح!**\n\n📧 **إليك بيانات الإيميل القديم الخاص بك:**\n`{email_data}`\n\n*اضغط على النص أعلاه لنسخه مباشرة.*",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to send email to user: {e}")
+            await callback.message.edit_text(f"{callback.message.text}\n\n✅ **تم قبول الطلب وإرسال الإيميل للزبون بنجاح!**", parse_mode="Markdown")
+        else:
+            await callback.answer("❌ المخزن فارغ! يرجى تعبئة EMAILS_OLD أولاً.", show_alert=True)
+
+    elif data.startswith("adm_rej_"):
+        dep_id = data.replace("adm_rej_", "")
+        client_id = pending_deposits.get(dep_id)
+        if client_id:
+            try:
+                await bot.send_message(
+                    chat_id=client_id,
+                    text="❌ **عذراً، تعذر التحقق من عملية الدفع الخاصة بك.**\nيرجى التواصل مع الدعم الفني لمراجعة الطلب."
+                )
+            except Exception as e:
+                logging.error(f"Failed to notify user: {e}")
+        await callback.message.edit_text(f"{callback.message.text}\n\n❌ **تم رفض الطلب.**", parse_mode="Markdown")
+
     elif data == "referral_system":
         bot_info = await bot.get_me()
-        user_id = callback.from_user.id
         ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
         text = (
             f"🎁 **برنامج الإحالة والمكافآت:**\n\n"
             f"احصل على **إيميل قديم مجاناً (0.60$)** عند دعوة 5 من أصدقائك!\n\n"
-            f"📌 **الشروط:**\n"
-            f"1️⃣ يجب أن يسجل الصديق في البوت عبر رابطك الخاص.\n"
-            f"2️⃣ يجب أن يقوم الصديق بإتمام **عملية شراء واحدة على الأقل** من المتجر.\n\n"
-            f"🔗 **رابط الدعوة الخاص بك:**\n`{ref_link}`\n\n"
-            f"📥 *عند اكتمال الـ 5 إحالات المؤهلة، تواصل مع الدعم الفني لاستلام إيميلك المجاني فوراً!*"
+            f"🔗 **رابط الدعوة الخاص بك:**\n`{ref_link}`"
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
         
@@ -205,10 +219,14 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
 async def process_proof(message: types.Message, state: FSMContext):
     await state.clear()
     
+    user_id = message.from_user.id
+    dep_id = str(user_id)
+    pending_deposits[dep_id] = user_id
+
     user_text = (
         "⏳ **تم استلام بيانات التحويل بنجاح!**\n\n"
         "جاري التحقق من العملية وتأكيد الشحن..\n"
-        "⏱ **سيتم إضافة الرصيد إلى حسابك خلال 5 إلى 15 دقيقة.**\n\n"
+        "⏱ **سيتم إرسال الطلب فور تأكيد العملية.**\n\n"
         "شكراً لانتظارك! 🌹"
     )
     await message.answer(user_text, parse_mode="Markdown", reply_markup=back_menu())
@@ -217,13 +235,24 @@ async def process_proof(message: types.Message, state: FSMContext):
         admin_text = (
             f"📥 **طلب إيداع جديد!**\n\n"
             f"👤 **الزبون:** {message.from_user.full_name} (@{message.from_user.username})\n"
-            f"🆔 **ID الزبون:** `{message.from_user.id}`\n\n"
+            f"🆔 **ID الزبون:** `{user_id}`\n\n"
             f"📝 **بيانات العملية / النص المرسل:**\n{message.text if message.text else 'أرسل صورة إشعار'}"
         )
         if message.photo:
-            await bot.send_photo(chat_id=ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_text, parse_mode="Markdown")
+            await bot.send_photo(
+                chat_id=ADMIN_ID,
+                photo=message.photo[-1].file_id,
+                caption=admin_text,
+                parse_mode="Markdown",
+                reply_markup=admin_approval_menu(dep_id)
+            )
         else:
-            await bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="Markdown")
+            await bot.send_message(
+                chat_id=ADMIN_ID,
+                text=admin_text,
+                parse_mode="Markdown",
+                reply_markup=admin_approval_menu(dep_id)
+            )
     except Exception as e:
         logging.error(f"Failed to send admin notification: {e}")
 
