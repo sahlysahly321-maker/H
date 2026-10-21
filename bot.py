@@ -1,4 +1,4 @@
-iimport asyncio
+import asyncio
 import logging
 import os
 import urllib.request
@@ -245,7 +245,6 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
 
     emails_str = "\n".join(purchased_emails)
     
-    # رسالة نظيفة وجميلة للزبون
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
     await message.answer(
         f"✅ **تمت عملية الشراء بنجاح!**\n\n"
@@ -256,7 +255,6 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         reply_markup=kb
     )
     
-    # إرسال إشعار خاص لك كأدمن لتتمكن من حذفها من الجدول بكل سهولة
     cat_name = "إيميلات قديمة" if cat == "cat_old" else ("إيميلات جديدة" if cat == "cat_new" else "إيميلات (7-30 يوم)")
     admin_notification = (
         f"🛒 **عملية شراء جديدة تمت!**\n\n"
@@ -318,7 +316,7 @@ async def start_web_server():
     app.router.add_get('/', handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.com.get("PORT", 10000) if hasattr(os.environ, "get") else 10000))
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 10000)))
     await site.start()
 
 async def main():
@@ -328,5 +326,6 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
