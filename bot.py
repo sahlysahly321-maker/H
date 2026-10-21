@@ -119,8 +119,8 @@ EMAILS_OLD = [
 ]
 
 EMAILS_NEW = [
-    "hoiphonop7@gmail.com:orange2006#",
-    "arsenyefim01@gmail.com:orange2006#",
+    "franecordoba@gmail.com:orange2006#",
+    "Wekjan21@gmail.com:orange2006#",
     "enginaltan276@gmail.com:orange2006#"
 ]
 
