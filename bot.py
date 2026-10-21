@@ -31,16 +31,18 @@ EMAILS_OLD = [
 ]
 
 EMAILS_NEW = [
-    "new_user1_2026@gmail.com:Pass1234",
-    "new_user2_2026@gmail.com:Pass5678"
+    "hoiphonop7@gmail.com:orange2006#",
+"arsenyefim01@gmail.com:orange2006#",
+"enginaltan276@gmail.com:orange2006#",
 ]
 
 EMAILS_MEDIUM = [
-    "med_user1_2026@gmail.com:Pass1234",
-    "med_user2_2026@gmail.com:Pass5678"
+    "fathserifalkadi@gmail.com:orange2006#",
+"kiza46809@gmail.com:orange2006#",
+"salehmardani355@gmail.com:orange2006#",
 ]
 
-# طلبات الشحن المعلقة {deposit_id: {"user_id": int, "amount": float}}
+# طلبات الشحن المعلقة {deposit_id: user_id}
 pending_deposits = {}
 
 def get_user_balance(user_id):
@@ -82,12 +84,9 @@ def back_menu():
     return InlineKeyboardMarkup(inline_keyboard=[[btn]])
 
 def admin_approval_menu(deposit_id):
-    # إضافة مبالغ شحن سريعة كخيارات للأدمن عند الموافقة
-    btn_06 = InlineKeyboardButton(text="✅ قبول وإضافة 0.60$", callback_data=f"adm_app_{deposit_id}_0.60")
-    btn_10 = InlineKeyboardButton(text="✅ قبول وإضافة 1.00$", callback_data=f"adm_app_{deposit_id}_1.00")
-    btn_custom = InlineKeyboardButton(text="✅ قبول وإضافة 5.00$", callback_data=f"adm_app_{deposit_id}_5.00")
+    btn_approve = InlineKeyboardButton(text="✅ قبول وتأكيد الشحن", callback_data=f"adm_app_{deposit_id}")
     btn_reject = InlineKeyboardButton(text="❌ رفض الطلب", callback_data=f"adm_rej_{deposit_id}")
-    return InlineKeyboardMarkup(inline_keyboard=[[btn_06, btn_10], [btn_custom], [btn_reject]])
+    return InlineKeyboardMarkup(inline_keyboard=[[btn_approve], [btn_reject]])
 
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message, state: FSMContext):
@@ -144,7 +143,6 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=buy_menu("medium"))
 
-    # شراء الإيميل فوراً وتلقائياً إذا كان الرصيد كافياً
     elif data.startswith("buy_"):
         cat = data.replace("buy_", "")
         price = 0.60 if cat in ["old", "medium"] else 0.35
@@ -160,7 +158,6 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             await callback.answer("❌ عذراً، هذه الفئة نفدت من المخزن حالياً!", show_alert=True)
             return
 
-        # خصم السعر وإعطاء الإيميل
         user_balances[user_id] -= price
         email_data = stock.pop(0)
         
@@ -198,6 +195,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             "📌 **2️⃣ عملات رقمية (USDT)**\n\n"
             "🔹 **USDT (BEP20):**\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\n"
             "🔹 **USDT (TRC20):**\n`TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx`\n\n"
+            "⚠️ **الحد الأدنى للإيداع:** `0.2 USDT`\n\n"
             "⚠️ أرسل العملية ثم اضغط على زر **أرسل إشعار التحويل لشحن الرصيد**."
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=check_pay_menu())
@@ -208,12 +206,12 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text(text, parse_mode="Markdown")
 
     elif data.startswith("adm_app_"):
-        parts = data.split("_")
-        dep_id = parts[2]
-        add_amount = float(parts[3])
-        
+        dep_id = data.replace("adm_app_", "")
         client_id = pending_deposits.get(dep_id)
+        
         if client_id:
+            # إضافة قيمة افتراضية للشحن (مثلاً 0.60$ ثمن إيميل) أو يمكنك تعديل الرصيد
+            add_amount = 0.60 
             user_balances[client_id] = get_user_balance(client_id) + add_amount
             try:
                 await bot.send_message(
@@ -228,7 +226,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
                 )
             except Exception as e:
                 logging.error(f"Failed to send notify: {e}")
-            await callback.message.edit_text(f"{callback.message.text}\n\n✅ **تم قبول الطلب وإضافة {add_amount}$ للزبون!**", parse_mode="Markdown")
+            await callback.message.edit_text(f"{callback.message.text}\n\n✅ **تم قبول الطلب وإضافة الرصيد للزبون!**", parse_mode="Markdown")
 
     elif data.startswith("adm_rej_"):
         dep_id = data.replace("adm_rej_", "")
@@ -237,95 +235,12 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             try:
                 await bot.send_message(
                     chat_id=client_id,
-                    text="❌ **عذراً، تعذر التحقق من عملية الدفع الخاص بك.**\nيرجى التواصل مع الدعم الفني."
+                    text="❌ **عذراً، تعذر التحقق من عملية الدفع الخاصة بك.**\nيرجى التواصل مع الدعم الفني."
                 )
             except Exception as e:
                 logging.error(f"Failed to notify: {e}")
         await callback.message.edit_text(f"{callback.message.text}\n\n❌ **تم رفض طلب الشحن.**", parse_mode="Markdown")
 
     elif data == "referral_system":
-        bot_info = await bot.get_me()
-        ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
-        text = (
-            f"🎁 **برنامج الإحالة والمكافآت:**\n\n"
-            f"احصل على **إيميل قديم مجاناً (0.60$)** عند دعوة 5 من أصدقائك!\n\n"
-            f"🔗 **رابط الدعوة الخاص بك:**\n`{ref_link}`"
-        )
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
-        
-    elif data == "support_info":
-        text = f"🛠 **الدعم الفني:**\nللتواصل والشحن أرسل للمالك مباشرة: {ADMIN_USERNAME}"
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
-        
-    elif data == "back_to_main":
-        await state.clear()
-        kb, bal = main_menu(user_id)
-        text = (
-            f"القائمة الرئيسية للمتجر 📧:\n\n"
-            f"💰 **رصيدك الحالي:** `{bal:.2f}$`"
-        )
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-        
-    await callback.answer()
+        bot
 
-@dp.message(DepositState.waiting_for_proof)
-async def process_proof(message: types.Message, state: FSMContext):
-    await state.clear()
-    
-    user_id = message.from_user.id
-    dep_id = str(user_id)
-    pending_deposits[dep_id] = user_id
-
-    user_text = (
-        "⏳ **تم استلام بيانات التحويل بنجاح!**\n\n"
-        "جاري التحقق من التحويل وتعبئة الرصيد..\n"
-        "⏱ **سيتم إشعارك فور تعبئة الرصيد.**\n\n"
-        "شكراً لانتظارك! 🌹"
-    )
-    await message.answer(user_text, parse_mode="Markdown", reply_markup=back_menu())
-    
-    try:
-        admin_text = (
-            f"📥 **طلب شحن رصيد جديد!**\n\n"
-            f"👤 **الزبون:** {message.from_user.full_name} (@{message.from_user.username})\n"
-            f"🆔 **ID الزبون:** `{user_id}`\n\n"
-            f"📝 **بيانات العملية:**\n{message.text if message.text else 'أرسل صورة إشعار'}"
-        )
-        if message.photo:
-            await bot.send_photo(
-                chat_id=ADMIN_ID,
-                photo=message.photo[-1].file_id,
-                caption=admin_text,
-                parse_mode="Markdown",
-                reply_markup=admin_approval_menu(dep_id)
-            )
-        else:
-            await bot.send_message(
-                chat_id=ADMIN_ID,
-                text=admin_text,
-                parse_mode="Markdown",
-                reply_markup=admin_approval_menu(dep_id)
-            )
-    except Exception as e:
-        logging.error(f"Failed to send admin notification: {e}")
-
-async def handle_ping(request):
-    return web.Response(text="Bot is active and running 24/7!")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get("PORT", 10000))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-
-async def main():
-    print("🚀 البوت يعمل مع خادم الاستجابة ونظام الرصيد...")
-    await bot.delete_webhook(drop_pending_updates=True)
-    await start_web_server()
-    await dp.start_polling(bot, handle_signals=False)
-
-if __name__ == '__main__':
-    asyncio.run(main())
