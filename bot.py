@@ -60,7 +60,7 @@ admin_action_target = {}
 EMAILS_OLD = [
     "mk2915564@gmail.com:orange2006#",
     "millmaize@gmail.com:orange2006#",
-    "goldendome63@gmail.com:orange2006#"
+    "goldendome63@gmail.com:orange2006#",
 ]
 
 EMAILS_NEW = [
