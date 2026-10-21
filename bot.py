@@ -20,34 +20,39 @@ dp = Dispatcher(storage=MemoryStorage())
 class DepositState(StatesGroup):
     waiting_for_proof = State()
 
+# قاعدة بيانات مؤقتة لرصيد المستخدمين {user_id: balance}
+user_balances = {}
+
 # مخازن الإيميلات
 EMAILS_OLD = [
     "mk2915564@gmail.com:orange2006#",
     "millmaize@gmail.com:orange2006#",
-    "goldendome63@gmail.com:orange2006#",
+    "goldendome63@gmail.com:orange2006#"
 ]
 
 EMAILS_NEW = [
-    "hoiphonop7@gmail.com:orange2006#",
-"arsenyefim01@gmail.com:orange2006#",
-"enginaltan276@gmail.com:orange2006#",
+    "new_user1_2026@gmail.com:Pass1234",
+    "new_user2_2026@gmail.com:Pass5678"
 ]
 
 EMAILS_MEDIUM = [
-    "fathserifalkadi@gmail.com:orange2006#",
-"kiza46809@gmail.com:orange2006#",
-"salehmardani355@gmail.com:orange2006#",
+    "med_user1_2026@gmail.com:Pass1234",
+    "med_user2_2026@gmail.com:Pass5678"
 ]
 
-# ذاكرة مؤقتة لطلبات الشراء
+# طلبات الشحن المعلقة {deposit_id: {"user_id": int, "amount": float}}
 pending_deposits = {}
 
-def main_menu():
+def get_user_balance(user_id):
+    return user_balances.get(user_id, 0.0)
+
+def main_menu(user_id):
+    balance = get_user_balance(user_id)
     btn1 = InlineKeyboardButton(text="📧 قائمة الإيميلات والمخزن", callback_data="list_emails")
-    btn2 = InlineKeyboardButton(text="💳 طرق الدفع والشحن", callback_data="payment_methods")
+    btn2 = InlineKeyboardButton(text="💳 شحن الرصيد وطرق الدفع", callback_data="payment_methods")
     btn3 = InlineKeyboardButton(text="🎁 نظام الإحالة", callback_data="referral_system")
     btn4 = InlineKeyboardButton(text="🛠 الدعم الفني", callback_data="support_info")
-    return InlineKeyboardMarkup(inline_keyboard=[[btn1], [btn2], [btn3], [btn4]])
+    return InlineKeyboardMarkup(inline_keyboard=[[btn1], [btn2], [btn3], [btn4]]), balance
 
 def email_categories_menu():
     btn1 = InlineKeyboardButton(text="1️⃣ إيميلات قديمة (0.6$)", callback_data="cat_old")
@@ -57,7 +62,7 @@ def email_categories_menu():
     return InlineKeyboardMarkup(inline_keyboard=[[btn1], [btn2], [btn3], [btn_back]])
 
 def buy_menu(category_code):
-    btn_buy = InlineKeyboardButton(text="🛒 تأكيد الشراء الآن", callback_data=f"buy_{category_code}")
+    btn_buy = InlineKeyboardButton(text="🛒 شراء الآن بالرصيد", callback_data=f"buy_{category_code}")
     btn_back = InlineKeyboardButton(text="🔙 العودة لفئات الإيميلات", callback_data="list_emails")
     return InlineKeyboardMarkup(inline_keyboard=[[btn_buy], [btn_back]])
 
@@ -68,7 +73,7 @@ def payment_menu():
     return InlineKeyboardMarkup(inline_keyboard=[[btn_sham], [btn_crypto], [btn_back]])
 
 def check_pay_menu():
-    btn_check = InlineKeyboardButton(text="✅ التحقق من الدفع", callback_data="check_payment")
+    btn_check = InlineKeyboardButton(text="✅ أرسل إشعار التحويل لشحن الرصيد", callback_data="check_payment")
     btn_back = InlineKeyboardButton(text="🔙 العودة لطرق الدفع", callback_data="payment_methods")
     return InlineKeyboardMarkup(inline_keyboard=[[btn_check], [btn_back]])
 
@@ -77,17 +82,23 @@ def back_menu():
     return InlineKeyboardMarkup(inline_keyboard=[[btn]])
 
 def admin_approval_menu(deposit_id):
-    btn_approve = InlineKeyboardButton(text="✅ تأكيد وإرسال إيميل (قديم)", callback_data=f"adm_app_old_{deposit_id}")
+    # إضافة مبالغ شحن سريعة كخيارات للأدمن عند الموافقة
+    btn_06 = InlineKeyboardButton(text="✅ قبول وإضافة 0.60$", callback_data=f"adm_app_{deposit_id}_0.60")
+    btn_10 = InlineKeyboardButton(text="✅ قبول وإضافة 1.00$", callback_data=f"adm_app_{deposit_id}_1.00")
+    btn_custom = InlineKeyboardButton(text="✅ قبول وإضافة 5.00$", callback_data=f"adm_app_{deposit_id}_5.00")
     btn_reject = InlineKeyboardButton(text="❌ رفض الطلب", callback_data=f"adm_rej_{deposit_id}")
-    return InlineKeyboardMarkup(inline_keyboard=[[btn_approve], [btn_reject]])
+    return InlineKeyboardMarkup(inline_keyboard=[[btn_06, btn_10], [btn_custom], [btn_reject]])
 
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer(
-        "أهلاً بك في متجر الإيميلات الفوري! 📧✨\nاختر من القائمة أدناه الخدمة التي تريدها:",
-        reply_markup=main_menu()
+    kb, bal = main_menu(message.from_user.id)
+    text = (
+        f"أهلاً بك في متجر الإيميلات الفوري! 📧✨\n\n"
+        f"💰 **رصيدك الحالي:** `{bal:.2f}$`\n\n"
+        f"اختر الخدمة التي تريدها من الأزرار أدناه:"
     )
+    await message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
 @dp.callback_query()
 async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
@@ -106,7 +117,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             f"📅 **العمر:** تاريخ إنشاء من نصف سنة إلى 5 سنين\n"
             f"📊 **المتوفر:** `{count}` إيميل\n"
             f"🛡 **الكفالة:** لمدة يومين من تاريخ الشراء\n\n"
-            f"👇 اضغط على **تأكيد الشراء الآن** للشراء:"
+            f"👇 اضغط للشراء المباشر بالرصيد:"
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=buy_menu("old"))
 
@@ -117,7 +128,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             f"💵 **السعر:** 0.35$\n"
             f"📊 **المتوفر:** `{count}` إيميل\n"
             f"🛡 **الكفالة:** لمدة 24 ساعة من تاريخ الشراء\n\n"
-            f"👇 اضغط على **تأكيد الشراء الآن** للشراء:"
+            f"👇 اضغط للشراء المباشر بالرصيد:"
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=buy_menu("new"))
 
@@ -129,13 +140,46 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             f"📅 **العمر:** من 7 أيام إلى 30 يوم\n"
             f"📊 **المتوفر:** `{count}` إيميل\n"
             f"🛡 **الكفالة:** لمدة يومين من تاريخ الشراء\n\n"
-            f"👇 اضغط على **تأكيد الشراء الآن** للشراء:"
+            f"👇 اضغط للشراء المباشر بالرصيد:"
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=buy_menu("medium"))
 
+    # شراء الإيميل فوراً وتلقائياً إذا كان الرصيد كافياً
+    elif data.startswith("buy_"):
+        cat = data.replace("buy_", "")
+        price = 0.60 if cat in ["old", "medium"] else 0.35
+        bal = get_user_balance(user_id)
+
+        if bal < price:
+            await callback.answer(f"❌ رصيدك غير كافٍ ({bal:.2f}$)! يرجى شحن الرصيد أولاً.", show_alert=True)
+            return
+
+        stock = EMAILS_OLD if cat == "old" else (EMAILS_NEW if cat == "new" else EMAILS_MEDIUM)
+        
+        if not stock:
+            await callback.answer("❌ عذراً، هذه الفئة نفدت من المخزن حالياً!", show_alert=True)
+            return
+
+        # خصم السعر وإعطاء الإيميل
+        user_balances[user_id] -= price
+        email_data = stock.pop(0)
+        
+        text = (
+            f"✅ **تمت عملية الشراء بنجاح!**\n\n"
+            f"💰 **المبلغ المخصوم:** `{price}$`\n"
+            f"💵 **رصيدك المتبقي:** `{user_balances[user_id]:.2f}$`\n\n"
+            f"📧 **بيانات الإيميل الخاص بك:**\n`{email_data}`\n\n"
+            f"*اضغط على النص أعلاه لنسخه مباشرة.*"
+        )
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=back_menu())
+
     elif data == "payment_methods":
         await state.clear()
-        text = "💳 **اختر طريقة الدفع المناسبة لك من الأسفل:**"
+        text = (
+            f"💳 **شحن الرصيد وطرق الدفع:**\n\n"
+            f"💰 **رصيدك الحالي:** `{get_user_balance(user_id):.2f}$`\n\n"
+            f"اختر طريقة الدفع المناسبة لك للتحويل والتعبئة:"
+        )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=payment_menu())
 
     elif data == "pay_sham":
@@ -145,7 +189,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             "`18a4c2941387daeaf0256639ffc705e8`\n\n"
             "✅ **العملات المقبولة:** الدولار الأمريكي (USD) والليرة السورية (SYP)\n"
             "💱 **سعر الصرف الحالي في البوت:**\n`1 USD = 141 SYP`\n\n"
-            "⚠️ بعد إتمام التحويل اضغط على **التحقق من الدفع** لتسجيل رقم العملية."
+            "⚠️ بعد التحويل اضغط على **أرسل إشعار التحويل لشحن الرصيد**."
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=check_pay_menu())
 
@@ -154,33 +198,37 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             "📌 **2️⃣ عملات رقمية (USDT)**\n\n"
             "🔹 **USDT (BEP20):**\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\n"
             "🔹 **USDT (TRC20):**\n`TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx`\n\n"
-            "⚠️ أرسل العملية ثم اضغط على زر **التحقق من الدفع**."
+            "⚠️ أرسل العملية ثم اضغط على زر **أرسل إشعار التحويل لشحن الرصيد**."
         )
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=check_pay_menu())
 
     elif data == "check_payment":
         await state.set_state(DepositState.waiting_for_proof)
-        text = "📩 **يرجى كتابة رقم العملية (أو إرسال صورة إشعار التحويل) الآن في المحادثة:**"
+        text = "📩 **يرجى كتابة قيمة المبلغ والرقم الإشعاري (أو إرسال صورة إشعار التحويل) الآن:**"
         await callback.message.edit_text(text, parse_mode="Markdown")
 
-    elif data.startswith("adm_app_old_"):
-        dep_id = data.replace("adm_app_old_", "")
-        client_id = pending_deposits.get(dep_id)
+    elif data.startswith("adm_app_"):
+        parts = data.split("_")
+        dep_id = parts[2]
+        add_amount = float(parts[3])
         
-        if EMAILS_OLD:
-            email_data = EMAILS_OLD.pop(0)
-            if client_id:
-                try:
-                    await bot.send_message(
-                        chat_id=client_id,
-                        text=f"✅ **تم تأكيد إيداعك بنجاح!**\n\n📧 **إليك بيانات الإيميل القديم الخاص بك:**\n`{email_data}`\n\n*اضغط على النص أعلاه لنسخه مباشرة.*",
-                        parse_mode="Markdown"
-                    )
-                except Exception as e:
-                    logging.error(f"Failed to send email to user: {e}")
-            await callback.message.edit_text(f"{callback.message.text}\n\n✅ **تم قبول الطلب وإرسال الإيميل للزبون بنجاح!**", parse_mode="Markdown")
-        else:
-            await callback.answer("❌ المخزن فارغ! يرجى تعبئة EMAILS_OLD أولاً.", show_alert=True)
+        client_id = pending_deposits.get(dep_id)
+        if client_id:
+            user_balances[client_id] = get_user_balance(client_id) + add_amount
+            try:
+                await bot.send_message(
+                    chat_id=client_id,
+                    text=(
+                        f"🎉 **تم تأكيد الإيداع وإضافة الرصيد بنجاح!**\n\n"
+                        f"➕ **المبلغ المضاف:** `{add_amount:.2f}$`\n"
+                        f"💰 **رصيدك الحالي:** `{user_balances[client_id]:.2f}$`\n\n"
+                        f"يمكنك الآن التوجه لمخزن الإيميلات للشراء مباشرة! 🛒"
+                    ),
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logging.error(f"Failed to send notify: {e}")
+            await callback.message.edit_text(f"{callback.message.text}\n\n✅ **تم قبول الطلب وإضافة {add_amount}$ للزبون!**", parse_mode="Markdown")
 
     elif data.startswith("adm_rej_"):
         dep_id = data.replace("adm_rej_", "")
@@ -189,11 +237,11 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             try:
                 await bot.send_message(
                     chat_id=client_id,
-                    text="❌ **عذراً، تعذر التحقق من عملية الدفع الخاصة بك.**\nيرجى التواصل مع الدعم الفني لمراجعة الطلب."
+                    text="❌ **عذراً، تعذر التحقق من عملية الدفع الخاص بك.**\nيرجى التواصل مع الدعم الفني."
                 )
             except Exception as e:
-                logging.error(f"Failed to notify user: {e}")
-        await callback.message.edit_text(f"{callback.message.text}\n\n❌ **تم رفض الطلب.**", parse_mode="Markdown")
+                logging.error(f"Failed to notify: {e}")
+        await callback.message.edit_text(f"{callback.message.text}\n\n❌ **تم رفض طلب الشحن.**", parse_mode="Markdown")
 
     elif data == "referral_system":
         bot_info = await bot.get_me()
@@ -211,7 +259,12 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         
     elif data == "back_to_main":
         await state.clear()
-        await callback.message.edit_text("القائمة الرئيسية للمتجر 📧:", reply_markup=main_menu())
+        kb, bal = main_menu(user_id)
+        text = (
+            f"القائمة الرئيسية للمتجر 📧:\n\n"
+            f"💰 **رصيدك الحالي:** `{bal:.2f}$`"
+        )
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
         
     await callback.answer()
 
@@ -225,18 +278,18 @@ async def process_proof(message: types.Message, state: FSMContext):
 
     user_text = (
         "⏳ **تم استلام بيانات التحويل بنجاح!**\n\n"
-        "جاري التحقق من العملية وتأكيد الشحن..\n"
-        "⏱ **سيتم إرسال الطلب فور تأكيد العملية.**\n\n"
+        "جاري التحقق من التحويل وتعبئة الرصيد..\n"
+        "⏱ **سيتم إشعارك فور تعبئة الرصيد.**\n\n"
         "شكراً لانتظارك! 🌹"
     )
     await message.answer(user_text, parse_mode="Markdown", reply_markup=back_menu())
     
     try:
         admin_text = (
-            f"📥 **طلب إيداع جديد!**\n\n"
+            f"📥 **طلب شحن رصيد جديد!**\n\n"
             f"👤 **الزبون:** {message.from_user.full_name} (@{message.from_user.username})\n"
             f"🆔 **ID الزبون:** `{user_id}`\n\n"
-            f"📝 **بيانات العملية / النص المرسل:**\n{message.text if message.text else 'أرسل صورة إشعار'}"
+            f"📝 **بيانات العملية:**\n{message.text if message.text else 'أرسل صورة إشعار'}"
         )
         if message.photo:
             await bot.send_photo(
@@ -269,11 +322,10 @@ async def start_web_server():
     await site.start()
 
 async def main():
-    print("🚀 البوت يعمل مع خادم الاستجابة...")
+    print("🚀 البوت يعمل مع خادم الاستجابة ونظام الرصيد...")
     await bot.delete_webhook(drop_pending_updates=True)
     await start_web_server()
     await dp.start_polling(bot, handle_signals=False)
 
 if __name__ == '__main__':
     asyncio.run(main())
-
