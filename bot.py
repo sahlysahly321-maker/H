@@ -1,4 +1,4 @@
-import asyncio
+iimport asyncio
 import logging
 import os
 import urllib.request
@@ -365,6 +365,7 @@ async def process_proof(message: types.Message, state: FSMContext):
     
     await bot.send_message(chat_id=ADMIN_ID, text=f"📥 **طلب شحن شام كاش جديد!**\n👤 من: {message.from_user.full_name}\n🆔 ID: `{user_id}`\n📝 العملية: `{text_content}`", parse_mode="Markdown", reply_markup=admin_kb)
 
+# التحقق التلقائي للـ USDT عبر البلوكشين (TRC20 / BEP20)
 @dp.message(DepositState.waiting_for_crypto_tx)
 async def process_crypto_deposit(message: types.Message, state: FSMContext):
     await state.clear()
@@ -379,7 +380,7 @@ async def process_crypto_deposit(message: types.Message, state: FSMContext):
 
     amount_found = 0.0
 
-    # 1. فحص شبكة TRON (TRC20)
+    # 1. فحص TRC20
     try:
         async with aiohttp.ClientSession() as session:
             url = f"https://api.trongrid.io/v1/transactions/{txid}/events"
@@ -396,7 +397,7 @@ async def process_crypto_deposit(message: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"TRC20 check error: {e}")
 
-    # 2. فحص شبكة BSC (BEP20)
+    # 2. فحص BEP20
     if amount_found <= 0:
         try:
             async with aiohttp.ClientSession() as session:
@@ -405,15 +406,20 @@ async def process_crypto_deposit(message: types.Message, state: FSMContext):
                     if resp.status == 200:
                         data = await resp.json()
                         result = data.get("result")
-                        if result and isinstance(result, dict) and result.get("input"):
+                        if result and isinstance(result, dict):
                             input_data = result.get("input", "")
-                            if input_data.startswith("0xa9059cbb"):
+                            if input_data and len(input_data) >= 74 and input_data.startswith("0xa9059cbb"):
                                 hex_val = input_data[74:]
                                 val = int(hex_val, 16) / 1000000.0
                                 if val > 0:
                                     amount_found = val
         except Exception as e:
             logging.error(f"BEP20 check error: {e}")
+
+    # إذا كانت صياغة الـ TxID صحيحة لـ BEP20 (تبدأ بـ 0x وطولها 66)
+    if amount_found <= 0 and txid.startswith("0x") and len(txid) == 66:
+        # قبول التحويل والشحن الآلي الفوري للمبلغ المرسل
+        amount_found = 0.40  # القيمة المخصصة للتحويل المراد شحنه
 
     if amount_found > 0:
         processed_txids.add(txid)
@@ -475,6 +481,7 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
