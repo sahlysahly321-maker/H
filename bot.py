@@ -30,6 +30,7 @@ user_purchases = {}
 user_referrals = {}
 sold_emails_set = set()
 used_txids = set()
+blocked_users_set = set()
 
 def get_user_balance(user_id):
     return user_balances.get(user_id, 0.0)
@@ -87,8 +88,12 @@ def main_menu(user_id):
 
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message, state: FSMContext):
-    await state.clear()
     user_id = message.from_user.id
+    if user_id in blocked_users_set:
+        await message.answer("❌ عذراً، أنت محظور من استخدام هذا البوت.")
+        return
+
+    await state.clear()
     if user_id not in user_balances:
         user_balances[user_id] = 0.0
 
@@ -103,6 +108,43 @@ async def send_welcome(message: types.Message, state: FSMContext):
 
     kb, bal = main_menu(user_id)
     await message.answer(f"أهلاً بك في متجر الإيميلات الفوري! 📧✨\n\n💰 **رصيدك الحالي:** `{bal:.2f}$`\n\nاختر الخدمة من الأزرار أدناه:", parse_mode="Markdown", reply_markup=kb)
+
+@dp.message(Command("ban"))
+async def ban_user(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    args = message.text.split()
+    if len(args) > 1:
+        try:
+            b_id = int(args[1])
+            blocked_users_set.add(b_id)
+            await message.answer(f"🚫 تم حظر المستخدم ذو الأيدي: `{b_id}` بنجاح.", parse_mode="Markdown")
+            try:
+                await bot.send_message(chat_id=b_id, text="❌ تم حظرك من استخدام البوت.")
+            except:
+                pass
+        except ValueError:
+            await message.answer("⚠️ يرجى كتابة ID صحيح بعد الأمر.")
+    else:
+        await message.answer("⚠️ الاستخدام الصحيح:\n`/ban [USER_ID]`", parse_mode="Markdown")
+
+@dp.message(Command("unban"))
+async def unban_user(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    args = message.text.split()
+    if len(args) > 1:
+        try:
+            b_id = int(args[1])
+            if b_id in blocked_users_set:
+                blocked_users_set.remove(b_id)
+                await message.answer(f"✅ تم إلغاء حظر المستخدم: `{b_id}`", parse_mode="Markdown")
+            else:
+                await message.answer("⚠️ هذا المستخدم ليس محظوراً أساساً.")
+        except ValueError:
+            await message.answer("⚠️ يرجى كتابة ID صحيح.")
+    else:
+        await message.answer("⚠️ الاستخدام الصحيح:\n`/unban [USER_ID]`", parse_mode="Markdown")
 
 @dp.message(Command("bc"))
 async def broadcast_message(message: types.Message):
@@ -123,8 +165,12 @@ async def broadcast_message(message: types.Message):
 
 @dp.callback_query()
 async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
-    data = callback.data
     user_id = callback.from_user.id
+    if user_id in blocked_users_set:
+        await callback.answer("❌ أنت محظور من استخدام البوت.", show_alert=True)
+        return
+
+    data = callback.data
     
     if data == "list_emails":
         await state.clear()
@@ -287,6 +333,9 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(BuyState.waiting_for_quantity)
 async def process_buy_quantity(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+    if user_id in blocked_users_set:
+        return
+
     user_data = await state.get_data()
     cat = user_data.get("selected_cat")
     
@@ -339,9 +388,12 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
     )
     
     cat_name = "إيميلات قديمة" if cat == "cat_old" else ("إيميلات جديدة" if cat == "cat_new" else "إيميلات (7-30 يوم)")
+    username_str = f"@{message.from_user.username}" if message.from_user.username else "لا يوجد"
     admin_notification = (
         f"🛒 **عملية شراء جديدة تمت!**\n\n"
-        f"👤 **الزبون:** {message.from_user.full_name} (`{user_id}`)\n"
+        f"👤 **الزبون:** {message.from_user.full_name}\n"
+        f"🔗 **المعرف:** {username_str}\n"
+        f"🆔 **ID:** `{user_id}`\n"
         f"📂 **الفئة:** {cat_name}\n"
         f"📦 **الكمية:** {qty}\n\n"
         f"📧 **الإيميلات المباعة (يرجى حذفها من الشيت يدوياً):**\n`{emails_str}`"
@@ -349,92 +401,8 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
     try:
         await bot.send_message(chat_id=ADMIN_ID, text=admin_notification, parse_mode="Markdown")
     except Exception as e:
-        logging.error(f"Failed to send admin notification: {e}")
+        logging.error(f"Failed to send admin notification:
 
-    await state.clear()
-
-@dp.message(DepositState.waiting_for_sham_proof)
-async def process_sham_proof(message: types.Message, state: FSMContext):
-    await state.clear()
-    user_id = message.from_user.id
-    text_content = (message.text or message.caption or "").strip()
-
-    kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-    await message.answer("⏳ **تم استلام رقم العملية، جاري المراجعة من الإدارة وإضافة الرصيد...**", parse_mode="Markdown", reply_markup=kb_back)
-    
-    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ قبول وتحديد المبلغ", callback_data=f"adm_app_{user_id}")],
-        [InlineKeyboardButton(text="❌ رفض الطلب", callback_data=f"adm_rej_{user_id}")]
-    ])
-    
-    await bot.send_message(chat_id=ADMIN_ID, text=f"📥 **طلب شحن شام كاش جديد!**\n👤 من: {message.from_user.full_name}\n🆔 ID: `{user_id}`\n📝 العملية: `{text_content}`", parse_mode="Markdown", reply_markup=admin_kb)
-
-@dp.message(DepositState.waiting_for_crypto_txid)
-async def process_crypto_txid(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    txid = message.text.strip()
-    data = await state.get_data()
-    network = data.get("crypto_network", "USDT")
-    await state.clear()
-
-    if txid in used_txids:
-        await message.answer("❌ **عذراً، رقم العملية هذا تم استخدامه مسبقاً!**")
-        return
-
-    kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-    await message.answer("⏳ **تم استلام رقم العملية (TxID)، جاري مراجعة التحويل من الإدارة وتنزيل الرصيد...**", parse_mode="Markdown", reply_markup=kb_back)
-
-    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ إدخال المبلغ وتأكيد الشحن", callback_data=f"adm_app_{user_id}")],
-        [InlineKeyboardButton(text="❌ رفض", callback_data=f"adm_rej_{user_id}")]
-    ])
-    
-    await bot.send_message(
-        chat_id=ADMIN_ID, 
-        text=f"📥 **طلب شحن عملات رقمية جديد!**\n\n👤 الزبون: {message.from_user.full_name} (`{user_id}`)\n🌐 الشبكة: `{network}`\n🔗 TxID: `{txid}`\n\n*(اضغط على زر القبول وأرسل المبلغ الحقيقي مثل 0.3 لتضاف للزبون)*", 
-        parse_mode="Markdown", 
-        reply_markup=admin_kb
-    )
-
-@dp.message(lambda message: message.from_user.id == ADMIN_ID and ADMIN_ID in admin_action_target)
-async def process_admin_amount_input(message: types.Message):
-    client_id = admin_action_target.pop(ADMIN_ID, None)
-    if not client_id:
-        return
-
-    try:
-        amount_to_add = float(message.text.strip())
-    except ValueError:
-        await message.answer("❌ يرجى إرسال رقم صحيح للمبلغ (مثال: `0.3`):")
-        admin_action_target[ADMIN_ID] = client_id
-        return
-
-    new_bal = update_user_balance(client_id, amount_to_add)
-    try:
-        await bot.send_message(chat_id=client_id, text=f"🎉 **تم قبول الإيداع وإضافة الرصيد!**\n➕ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك الحالي: `{new_bal:.2f}$`", parse_mode="Markdown")
-    except:
-        pass
-
-    await message.answer(f"✅ تمت إضافة `{amount_to_add:.2f}$` للزبون بنجاح.")
-
-async def handle_ping(request):
-    return web.Response(text="Bot is running!")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 10000)))
-    await site.start()
-
-async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
-    await start_web_server()
-    await dp.start_polling(bot, handle_signals=False)
-
-if __name__ == '__main__':
-    asyncio.run(main())
 
 
 
