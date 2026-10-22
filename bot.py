@@ -28,6 +28,7 @@ dp = Dispatcher(storage=MemoryStorage())
 user_balances = {}
 user_purchases = {}
 user_referrals = {}
+user_history = {} # لحفظ تفاصيل سجل العمليات لكل زبون
 sold_emails_set = set()
 used_txids = set()
 blocked_users_set = set()
@@ -82,6 +83,7 @@ def main_menu(user_id):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📧 قائمة الإيميلات والمخزن", callback_data="list_emails")],
         [InlineKeyboardButton(text="💳 شحن الرصيد وطرق الدفع", callback_data="payment_methods")],
+        [InlineKeyboardButton(text="👤 حسابي وسجلي الشامل", callback_data="my_profile")],
         [InlineKeyboardButton(text="🎁 نظام الإحالة والمكافآت", callback_data="referral_system")],
         [InlineKeyboardButton(text="🛠 الدعم الفني", callback_data="support_info")]
     ]), bal
@@ -247,6 +249,24 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         ])
         await callback.message.edit_text(f"💳 **شحن الرصيد وطرق الدفع:**\n\n💰 **رصيدك الحالي:** `{get_user_balance(user_id):.2f}$`", parse_mode="Markdown", reply_markup=kb)
 
+    elif data == "my_profile":
+        await state.clear()
+        bal = get_user_balance(user_id)
+        total_p = user_purchases.get(user_id, 0)
+        history_list = user_history.get(user_id, ["لا توجد عمليات سابقة حتى الآن."])
+        history_str = "\n".join(history_list[-5:]) # عرض آخر 5 عمليات فقط لتكون مرتبة
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
+        await callback.message.edit_text(
+            f"👤 **ملفك الشخصي وسجلك:**\n\n"
+            f"🆔 **معرفك (ID):** `{user_id}`\n"
+            f"💰 **رصيدك الحالي:** `{bal:.2f}$`\n"
+            f"🛒 **إجمالي الإيميلات المشتراة:** `{total_p}` إيميل\n\n"
+            f"📜 **سجل آخر عملياتك وحسابك:**\n{history_str}",
+            parse_mode="Markdown",
+            reply_markup=kb
+        )
+
     elif data == "pay_sham":
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ إرسال رقم العملية", callback_data="check_sham_payment")],
@@ -300,6 +320,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             await bot.send_message(chat_id=client_id, text="❌ **تم رفض طلب الشحن من قبل الإدارة.**", parse_mode="Markdown")
         except:
             pass
+        user_history.setdefault(client_id, []).append("❌ رفض الإدارة لطلب إيداع.")
         await callback.message.edit_text(f"{callback.message.text}\n\n❌ **تم رفض الطلب.**", parse_mode="Markdown")
 
     elif data == "referral_system":
@@ -374,6 +395,7 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         sold_emails_set.add(email_item)
 
     user_purchases[user_id] = user_purchases.get(user_id, 0) + qty
+    user_history.setdefault(user_id, []).append(f"🛒 شراء {qty} إيميل بقيمة `{total_cost}$`")
 
     emails_str = "\n".join(purchased_emails)
     
@@ -413,6 +435,7 @@ async def process_sham_proof(message: types.Message, state: FSMContext):
 
     await state.clear()
     text_content = (message.text or message.caption or "").strip()
+    user_history.setdefault(user_id, []).append(f"📥 طلب شحن شام كاش (رقم: {text_content})")
 
     kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
     await message.answer("⏳ **تم استلام رقم العملية، جاري المراجعة من الإدارة وإضافة الرصيد...**", parse_mode="Markdown", reply_markup=kb_back)
@@ -445,6 +468,8 @@ async def process_crypto_txid(message: types.Message, state: FSMContext):
         await message.answer("❌ **عذراً، رقم العملية هذا تم استخدامه مسبقاً!**")
         return
 
+    user_history.setdefault(user_id, []).append(f"📥 طلب شحن USDT ({network})")
+
     kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
     await message.answer("⏳ **تم استلام رقم العملية (TxID)، جاري مراجعة التحويل من الإدارة وتنزيل الرصيد...**", parse_mode="Markdown", reply_markup=kb_back)
 
@@ -475,6 +500,8 @@ async def process_admin_amount_input(message: types.Message):
         return
 
     new_bal = update_user_balance(client_id, amount_to_add)
+    user_history.setdefault(client_id, []).append(f"💰 شحن رصيد مقبول بقيمة `+{amount_to_add:.2f}$`")
+    
     try:
         await bot.send_message(chat_id=client_id, text=f"🎉 **تم قبول الإيداع وإضافة الرصيد!**\n➕ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك الحالي: `{new_bal:.2f}$`", parse_mode="Markdown")
     except:
@@ -500,6 +527,7 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
