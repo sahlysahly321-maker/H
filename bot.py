@@ -11,14 +11,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-API_TOKEN = '8735041657:AAHILJgf72t9IzJswxlIUeJK2rsRbhsCNXs'
+API_TOKEN = '8735041657:AAFVtc6d_dyvh_udzVOsk2wlkbp-KKOTvnI'
 ADMIN_ID = 7927059374
 ADMIN_USERNAME = "@Alaaa057"
 
 SPREADSHEET_ID = "1ZKVQTAMGb70ptWjj5eE9QsHg2Fyn-P2UeSiyUKi5Wdc"
-
-TRC20_WALLET = "TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx"
-BEP20_WALLET = "0xd22ccb682b5a8f1dbf6152882673b0130620cb11"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
@@ -28,8 +25,8 @@ user_balances = {}
 user_purchases = {}
 user_referrals = {}
 
+# قائمة تتبع الإيميلات المباعة لمنع تكرارها حتى لو تأخرت بحذفها من الجدول
 sold_emails_set = set()
-processed_txids = set()
 
 def get_user_balance(user_id):
     return user_balances.get(user_id, 0.0)
@@ -42,7 +39,6 @@ def update_user_balance(user_id, amount):
 
 class DepositState(StatesGroup):
     waiting_for_proof = State()
-    waiting_for_crypto_tx = State()
 
 class BuyState(StatesGroup):
     waiting_for_quantity = State()
@@ -196,46 +192,42 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await state.clear()
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="1️⃣ شام كاش", callback_data="pay_sham")],
-            [InlineKeyboardButton(text="2️⃣ عملات رقمية ⚡ (USDT Auto)", callback_data="pay_crypto")],
+            [InlineKeyboardButton(text="2️⃣ عملات رقمية (USDT)", callback_data="pay_crypto")],
             [InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]
         ])
         await callback.message.edit_text(f"💳 **شحن الرصيد وطرق الدفع:**\n\n💰 **رصيدك الحالي:** `{get_user_balance(user_id):.2f}$`", parse_mode="Markdown", reply_markup=kb)
 
     elif data == "pay_sham":
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ إرسال رقم العملية", callback_data="check_payment_sham")],
+            [InlineKeyboardButton(text="✅ إرسال رقم العملية", callback_data="check_payment")],
             [InlineKeyboardButton(text="🔙 العودة", callback_data="payment_methods")]
         ])
         await callback.message.edit_text(
             "📌 **1️⃣ شام كاش**\n\n"
             "العنوان:\n`18a4c2941387daeaf0256639ffc705e8`\n\n"
             "💵 **سعر الصرف المعتمد:** يتم الاعتماد حصراً على سعر الصرف الرسمي المحدث وقت التحويل.\n\n"
-            "⚠️ بعد التحويل اضغط على الزر أدناه وأرسل **رقم العملية** للمراجعة.",
+            "⚠️ بعد التحويل اضغط على الزر أدناه وأرسل **رقم العملية** فقط بدون صور أو مبالغ.",
             parse_mode="Markdown",
             reply_markup=kb
         )
 
     elif data == "pay_crypto":
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ إرسال TxID (شحن تلقائي)", callback_data="check_payment_crypto")],
+            [InlineKeyboardButton(text="✅ إرسال رقم العملية", callback_data="check_payment")],
             [InlineKeyboardButton(text="🔙 العودة", callback_data="payment_methods")]
         ])
         await callback.message.edit_text(
-            "📌 **2️⃣ عملات رقمية (USDT - Auto ⚡)**\n\n"
+            "📌 **2️⃣ عملات رقمية (USDT)**\n\n"
             "🔹 **BEP20:**\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\n"
             "🔹 **TRC20:**\n`TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx`\n\n"
-            "⚠️ بعد إتمام التحويل اضغط الزر أدناه وأرسل **رقم العملية (TxID)** ليتم شحن رصيدك أوتوماتيكياً فورا!",
+            "⚠️ بعد التحويل اضغط أدناه وأرسل **رقم العملية (TxID)** فقط.",
             parse_mode="Markdown",
             reply_markup=kb
         )
 
-    elif data == "check_payment_sham":
+    elif data == "check_payment":
         await state.set_state(DepositState.waiting_for_proof)
-        await callback.message.edit_text("📩 **يرجى إرسال رقم عملية شام كاش:**", parse_mode="Markdown")
-
-    elif data == "check_payment_crypto":
-        await state.set_state(DepositState.waiting_for_crypto_tx)
-        await callback.message.edit_text("📩 **يرجى إرسال رقم العملية (TxID) الخاص بالتحويل:**", parse_mode="Markdown")
+        await callback.message.edit_text("📩 **يرجى إرسال رقم العملية فقط:**", parse_mode="Markdown")
 
     elif data.startswith("adm_app_"):
         client_id = int(data.replace("adm_app_", ""))
@@ -259,8 +251,8 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
         await callback.message.edit_text(
             f"🎁 **برنامج الإحالة والمكافآت:**\n\n"
-            f"دعوة أصدقائك تمنحك إيميل قديم مجاناً عندما يقوم **5 من أصدقائك** بإتمام عملية شراء واحدة على الأقل!\n\n"
-            f"📊 **تقدمك الحالي:** `{completed_refs} / 5`\n\n"
+            f"دعوة أصدقائك تمنحك إيميل قديم مجاناً (0.60$) عندما يقوم **5 من أصدقائك المدعوين** بإتمام **عملية شراء واحدة** على الأقل!\n\n"
+            f"📊 **تقدمك الحالي:** `{completed_refs} / 5` أصدقاء أتموا الشراء.\n\n"
             f"🔗 **رابط الدعوة الخاص بك:**\n`{ref_link}`",
             parse_mode="Markdown",
             reply_markup=kb
@@ -312,6 +304,7 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
 
     new_bal = update_user_balance(user_id, -total_cost)
     
+    # اختيار الإيميلات وإضافتها إلى قائمة المباع لحجبها فوراً
     purchased_emails = []
     for i in range(qty):
         email_item = stock[i]
@@ -355,47 +348,14 @@ async def process_proof(message: types.Message, state: FSMContext):
     pending_operations[user_id] = text_content
 
     kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-    await message.answer("⏳ **تم استلام رقم العملية، جاري المراجعة من الإدارة...**", parse_mode="Markdown", reply_markup=kb_back)
+    await message.answer("⏳ **تم استلام رقم العملية، جاري المراجعة...**", parse_mode="Markdown", reply_markup=kb_back)
     
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ قبول وتحديد المبلغ", callback_data=f"adm_app_{user_id}")],
         [InlineKeyboardButton(text="❌ رفض الطلب", callback_data=f"adm_rej_{user_id}")]
     ])
     
-    await bot.send_message(chat_id=ADMIN_ID, text=f"📥 **طلب شحن شام كاش جديد!**\n👤 من: {message.from_user.full_name}\n🆔 ID: `{user_id}`\n📝 العملية: `{text_content}`", parse_mode="Markdown", reply_markup=admin_kb)
-
-@dp.message(DepositState.waiting_for_crypto_tx)
-async def process_crypto_deposit(message: types.Message, state: FSMContext):
-    await state.clear()
-    user_id = message.from_user.id
-    txid = message.text.strip()
-
-    if txid in processed_txids:
-        await message.answer("❌ **هذا رقم العملية (TxID) تم استخدامه من قبل ولا يمكن تكراره!**", parse_mode="Markdown")
-        return
-
-    if len(txid) >= 10:
-        processed_txids.add(txid)
-        added_amount = 1.00 
-        new_bal = update_user_balance(user_id, added_amount)
-        
-        await message.answer(
-            f"🎉 **تم استلام رقم العملية وشحن الرصيد بنجاح!**\n\n"
-            f"➕ **تمت إضافة:** `{added_amount:.2f}$`\n"
-            f"💰 **رصيدك الحالي:** `{new_bal:.2f}$`",
-            parse_mode="Markdown"
-        )
-        
-        try:
-            await bot.send_message(
-                chat_id=ADMIN_ID, 
-                text=f"⚡ **عملية شحن USDT جديدة!**\n👤 الزبون: {message.from_user.full_name}\n🆔 ID: `{user_id}`\n💵 المبلغ المضاف: `{added_amount:.2f}$`\n🔗 TxID: `{txid}`", 
-                parse_mode="Markdown"
-            )
-        except:
-            pass
-    else:
-        await message.answer("❌ **رقم العملية (TxID) غير صالح.**\nيرجى التأكد من الرمز وإرساله مجدداً.", parse_mode="Markdown")
+    await bot.send_message(chat_id=ADMIN_ID, text=f"📥 **طلب شحن جديد!**\n👤 من: {message.from_user.full_name}\n🆔 ID: `{user_id}`\n📝 العملية: `{text_content}`", parse_mode="Markdown", reply_markup=admin_kb)
 
 @dp.message(lambda message: message.from_user.id == ADMIN_ID and ADMIN_ID in admin_action_target)
 async def process_admin_amount_input(message: types.Message):
@@ -421,20 +381,22 @@ async def process_admin_amount_input(message: types.Message):
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
-async def main():
+async def start_web_server():
     app = web.Application()
     app.router.add_get('/', handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
-    port = int(os.environ.get("PORT", 10000))
-    site = web.TCPSite(runner, '0.0.0.0', port)
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 10000)))
     await site.start()
 
+async def main():
     await bot.delete_webhook(drop_pending_updates=True)
+    await start_web_server()
     await dp.start_polling(bot, handle_signals=False)
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
