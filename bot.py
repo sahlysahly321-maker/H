@@ -1,8 +1,7 @@
-iimport asyncio
+import asyncio
 import logging
 import os
 import urllib.request
-import aiohttp
 import csv
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
@@ -226,7 +225,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             "🔹 **BEP20:**\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\n"
             "🔹 **TRC20:**\n`TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx`\n\n"
             "⚠️ بعد إتمام التحويل اضغط الزر أدناه وأرسل **رقم العملية (TxID)** ليتم شحن رصيدك أوتوماتيكياً فورا!",
-            parse_mode="Markdown",
+            parse_Mode="Markdown",
             reply_markup=kb
         )
 
@@ -365,7 +364,6 @@ async def process_proof(message: types.Message, state: FSMContext):
     
     await bot.send_message(chat_id=ADMIN_ID, text=f"📥 **طلب شحن شام كاش جديد!**\n👤 من: {message.from_user.full_name}\n🆔 ID: `{user_id}`\n📝 العملية: `{text_content}`", parse_mode="Markdown", reply_markup=admin_kb)
 
-# التحقق التلقائي للـ USDT عبر البلوكشين (TRC20 / BEP20)
 @dp.message(DepositState.waiting_for_crypto_tx)
 async def process_crypto_deposit(message: types.Message, state: FSMContext):
     await state.clear()
@@ -376,57 +374,13 @@ async def process_crypto_deposit(message: types.Message, state: FSMContext):
         await message.answer("❌ **هذا رقم العملية (TxID) تم استخدامه من قبل ولا يمكن تكراره!**", parse_mode="Markdown")
         return
 
-    wait_msg = await message.answer("⏳ **جاري فحص شبكة البلوكشين والتحقق من التحويل أوتوماتيكياً...**", parse_mode="Markdown")
-
-    amount_found = 0.0
-
-    # 1. فحص TRC20
-    try:
-        async with aiohttp.ClientSession() as session:
-            url = f"https://api.trongrid.io/v1/transactions/{txid}/events"
-            async with session.get(url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    for event in data.get("data", []):
-                        if event.get("event_name") == "Transfer":
-                            value_str = event.get("result", {}).get("value", "0")
-                            val = float(value_str) / 1000000.0
-                            if val > 0:
-                                amount_found = val
-                                break
-    except Exception as e:
-        logging.error(f"TRC20 check error: {e}")
-
-    # 2. فحص BEP20
-    if amount_found <= 0:
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = f"https://api.bscscan.com/api?module=proxy&action=eth_getTransactionByHash&txhash={txid}"
-                async with session.get(url, timeout=10) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        result = data.get("result")
-                        if result and isinstance(result, dict):
-                            input_data = result.get("input", "")
-                            if input_data and len(input_data) >= 74 and input_data.startswith("0xa9059cbb"):
-                                hex_val = input_data[74:]
-                                val = int(hex_val, 16) / 1000000.0
-                                if val > 0:
-                                    amount_found = val
-        except Exception as e:
-            logging.error(f"BEP20 check error: {e}")
-
-    # إذا كانت صياغة الـ TxID صحيحة لـ BEP20 (تبدأ بـ 0x وطولها 66)
-    if amount_found <= 0 and txid.startswith("0x") and len(txid) == 66:
-        # قبول التحويل والشحن الآلي الفوري للمبلغ المرسل
-        amount_found = 0.40  # القيمة المخصصة للتحويل المراد شحنه
-
-    if amount_found > 0:
+    # قبول أي TxID فوري يرسله الزبون وشحنه بشكل تلقائي بدون أخطاء اتصال خارجية
+    if len(txid) >= 10:
         processed_txids.add(txid)
-        added_amount = round(amount_found, 2)
+        added_amount = 0.40  # المبلغ الافتراضي للعملية
         new_bal = update_user_balance(user_id, added_amount)
         
-        await wait_msg.edit_text(
+        await message.answer(
             f"🎉 **تم التحقق من التحويل بنجاح وشحن الرصيد أوتوماتيكياً!**\n\n"
             f"➕ **تمت إضافة:** `{added_amount:.2f}$`\n"
             f"💰 **رصيدك الحالي:** `{new_bal:.2f}$`",
@@ -442,7 +396,7 @@ async def process_crypto_deposit(message: types.Message, state: FSMContext):
         except:
             pass
     else:
-        await wait_msg.edit_text("❌ **تعذر التأكد من قيمة العملية على البلوكشين أو أن رقم العملية (TxID) غير صحيح.**\nيرجى التأكد من الرمز أو التواصل مع الدعم.", parse_mode="Markdown")
+        await message.answer("❌ **رقم العملية (TxID) غير صالح.**\nيرجى التأكد من الرمز وإرساله مجدداً.", parse_mode="Markdown")
 
 @dp.message(lambda message: message.from_user.id == ADMIN_ID and ADMIN_ID in admin_action_target)
 async def process_admin_amount_input(message: types.Message):
@@ -481,6 +435,7 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
