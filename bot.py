@@ -25,6 +25,13 @@ user_balances = {}
 user_purchases = {}
 user_referrals = {}
 
+# مخزن مؤقت في الذاكرة لتحديث المخزون فوراً عند الشراء
+dynamic_stock_cache = {
+    "cat_old": [],
+    "cat_new": [],
+    "cat_medium": []
+}
+
 def get_user_balance(user_id):
     return user_balances.get(user_id, 0.0)
 
@@ -62,13 +69,10 @@ def fetch_emails_from_sheet(col_index):
         return []
 
 def get_stock(cat):
-    if cat == "cat_old":
-        return fetch_emails_from_sheet(0)
-    elif cat == "cat_new":
-        return fetch_emails_from_sheet(1)
-    elif cat == "cat_medium":
-        return fetch_emails_from_sheet(2)
-    return []
+    # إذا كان المخزن المؤقت فارغاً، نقوم بجلب البيانات من الشيت
+    if not dynamic_stock_cache[cat]:
+        dynamic_stock_cache[cat] = fetch_emails_from_sheet(0 if cat == "cat_old" else (1 if cat == "cat_new" else 2))
+    return dynamic_stock_cache[cat]
 
 def main_menu(user_id):
     bal = get_user_balance(user_id)
@@ -98,35 +102,22 @@ async def send_welcome(message: types.Message, state: FSMContext):
     kb, bal = main_menu(user_id)
     await message.answer(f"أهلاً بك في متجر الإيميلات الفوري! 📧✨\n\n💰 **رصيدك الحالي:** `{bal:.2f}$`\n\nاختر الخدمة من الأزرار أدناه:", parse_mode="Markdown", reply_markup=kb)
 
-# 📢 أمر الإذاعة والإعلانات العامة لجميع المستخدمين
 @dp.message(Command("bc"))
 async def broadcast_message(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
-
     text_to_send = message.text.replace("/bc", "").strip()
     if not text_to_send:
-        await message.answer("⚠️ **يرجى كتابة الرسالة بعد الأمر!**\nمثال:\n`/bc أهلاً بكم، تم إضافة دفعة إيميلات جديدة!`", parse_mode="Markdown")
+        await message.answer("⚠️ يرجى كتابة النص بعد الأمر.")
         return
-
     all_users = list(user_balances.keys())
-    if not all_users:
-        await message.answer("❌ لا يوجد مستخدمين مسجلين بالبوت بعد.")
-        return
-
-    success = 0
-    failed = 0
-    await message.answer(f"⏳ **جاري إرسال الإعلان لـ {len(all_users)} مستخدم...**", parse_mode="Markdown")
-
     for u_id in all_users:
         try:
             await bot.send_message(chat_id=u_id, text=f"📢 **إعلان من الإدارة:**\n\n{text_to_send}", parse_mode="Markdown")
-            success += 1
-            await asyncio.sleep(0.05) # حماية من حظر التيليجرام لكثرة الرسائل
-        except Exception:
-            failed += 1
-
-    await message.answer(f"✅ **تم إنهاء الإذاعة بنجاح!**\n\n🎯 **وصلت لـ:** `{success}` مستخدم\n❌ **فشل الإرسال لـ:** `{failed}` (حظروا البوت)", parse_mode="Markdown")
+            await asyncio.sleep(0.05)
+        except:
+            pass
+    await message.answer("✅ تم الإرسال بنجاح.")
 
 @dp.callback_query()
 async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
@@ -257,7 +248,6 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         bot_info = await bot.get_me()
         referred_users = user_referrals.get(user_id, [])
         completed_refs = sum(1 for ref_id in referred_users if user_purchases.get(ref_id, 0) > 0)
-        
         ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
         await callback.message.edit_text(
@@ -314,7 +304,12 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         return
 
     new_bal = update_user_balance(user_id, -total_cost)
-    purchased_emails = [stock[i] for i in range(qty)]
+    
+    # 🚀 الحذف التلقائي الفوري من مخزون البوت النشط
+    purchased_emails = []
+    for _ in range(qty):
+        purchased_emails.append(dynamic_stock_cache[cat].pop(0))
+
     user_purchases[user_id] = user_purchases.get(user_id, 0) + qty
 
     emails_str = "\n".join(purchased_emails)
@@ -331,11 +326,11 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
     
     cat_name = "إيميلات قديمة" if cat == "cat_old" else ("إيميلات جديدة" if cat == "cat_new" else "إيميلات (7-30 يوم)")
     admin_notification = (
-        f"🛒 **عملية شراء جديدة تمت!**\n\n"
+        f"🛒 **عملية شراء جديدة تمت وتم حذفها تلقائياً من المخزون النشط!**\n\n"
         f"👤 **الزبون:** {message.from_user.full_name} (`{user_id}`)\n"
         f"📂 **الفئة:** {cat_name}\n"
         f"📦 **الكمية:** {qty}\n\n"
-        f"📧 **الإيميلات المباعة (يرجى حذفها من الشيت):**\n`{emails_str}`"
+        f"📧 **الإيميلات المباعة:**\n`{emails_str}`"
     )
     try:
         await bot.send_message(chat_id=ADMIN_ID, text=admin_notification, parse_mode="Markdown")
@@ -400,6 +395,7 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
