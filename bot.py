@@ -25,7 +25,6 @@ user_balances = {}
 user_purchases = {}
 user_referrals = {}
 
-# قائمة تتبع الإيميلات المباعة لمنع تكرارها حتى لو تأخرت بحذفها من الجدول
 sold_emails_set = set()
 
 def get_user_balance(user_id):
@@ -192,7 +191,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await state.clear()
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="1️⃣ شام كاش", callback_data="pay_sham")],
-            [InlineKeyboardButton(text="2️⃣ عملات رقمية (USDT)", callback_data="pay_crypto")],
+            [InlineKeyboardButton(text="2️⃣ عملات رقمية ⚡ (USDT Auto)", callback_data="pay_crypto")],
             [InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]
         ])
         await callback.message.edit_text(f"💳 **شحن الرصيد وطرق الدفع:**\n\n💰 **رصيدك الحالي:** `{get_user_balance(user_id):.2f}$`", parse_mode="Markdown", reply_markup=kb)
@@ -217,7 +216,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="🔙 العودة", callback_data="payment_methods")]
         ])
         await callback.message.edit_text(
-            "📌 **2️⃣ عملات رقمية (USDT)**\n\n"
+            "📌 **2️⃣ عملات رقمية (USDT - Auto)**\n\n"
             "🔹 **BEP20:**\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\n"
             "🔹 **TRC20:**\n`TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx`\n\n"
             "⚠️ بعد التحويل اضغط أدناه وأرسل **رقم العملية (TxID)** فقط.",
@@ -304,7 +303,6 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
 
     new_bal = update_user_balance(user_id, -total_cost)
     
-    # اختيار الإيميلات وإضافتها إلى قائمة المباع لحجبها فوراً
     purchased_emails = []
     for i in range(qty):
         email_item = stock[i]
@@ -396,6 +394,7 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
