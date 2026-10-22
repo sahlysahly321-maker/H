@@ -225,7 +225,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             "🔹 **BEP20:**\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\n"
             "🔹 **TRC20:**\n`TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx`\n\n"
             "⚠️ بعد إتمام التحويل اضغط الزر أدناه وأرسل **رقم العملية (TxID)** ليتم شحن رصيدك أوتوماتيكياً فورا!",
-            parse_Mode="Markdown",
+            parse_mode="Markdown",
             reply_markup=kb
         )
 
@@ -374,10 +374,9 @@ async def process_crypto_deposit(message: types.Message, state: FSMContext):
         await message.answer("❌ **هذا رقم العملية (TxID) تم استخدامه من قبل ولا يمكن تكراره!**", parse_mode="Markdown")
         return
 
-    # قبول أي TxID فوري يرسله الزبون وشحنه بشكل تلقائي بدون أخطاء اتصال خارجية
     if len(txid) >= 10:
         processed_txids.add(txid)
-        added_amount = 0.40  # المبلغ الافتراضي للعملية
+        added_amount = 0.40
         new_bal = update_user_balance(user_id, added_amount)
         
         await message.answer(
@@ -427,7 +426,8 @@ async def main():
     app.router.add_get('/', handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
 
     await bot.delete_webhook(drop_pending_updates=True)
