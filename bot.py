@@ -195,8 +195,8 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await state.clear()
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="1️⃣ شام كاش", callback_data="pay_sham")],
-            [InlineKeyboardButton(text="2️⃣ USDT - شبكة TRC20 (شحن فوري)", callback_data="pay_trc20")],
-            [InlineKeyboardButton(text="3️⃣ USDT - شبكة BEP20 (شحن فوري)", callback_data="pay_bep20")],
+            [InlineKeyboardButton(text="2️⃣ USDT - شبكة TRC20", callback_data="pay_trc20")],
+            [InlineKeyboardButton(text="3️⃣ USDT - شبكة BEP20", callback_data="pay_bep20")],
             [InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]
         ])
         await callback.message.edit_text(f"💳 **شحن الرصيد وطرق الدفع:**\n\n💰 **رصيدك الحالي:** `{get_user_balance(user_id):.2f}$`", parse_mode="Markdown", reply_markup=kb)
@@ -210,7 +210,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             "📌 **1️⃣ شام كاش**\n\n"
             "العنوان:\n`18a4c2941387daeaf0256639ffc705e8`\n\n"
             "💵 **سعر الصرف المعتمد:** يتم الاعتماد حصراً على سعر الصرف الرسمي المحدث وقت التحويل.\n\n"
-            "⚠️ بعد التحويل اضغط على الزر أدناه وأرسل **رقم العملية** للمراجعة اليدوية.",
+            "⚠️ بعد التحويل اضغط على الزر أدناه وأرسل **رقم العملية** للمراجعة.",
             parse_mode="Markdown",
             reply_markup=kb
         )
@@ -220,25 +220,25 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text("📩 **يرجى إرسال رقم العملية لشام كاش:**", parse_mode="Markdown")
 
     elif data == "pay_trc20":
-        await state.update_data(crypto_network="trc20")
+        await state.update_data(crypto_network="TRC20")
         await state.set_state(DepositState.waiting_for_crypto_txid)
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 إلغاء", callback_data="payment_methods")]])
         await callback.message.edit_text(
             f"📌 **USDT - شبكة TRC20**\n\n"
             f"العنوان:\n`{USDT_TRC20_WALLET}`\n\n"
-            f"⚡️ بعد إتمام التحويل، أرسل **رقم العملية (TxID)** هنا ليتم إضافة الرصيد تلقائياً:",
+            f"🔗 بعد إتمام التحويل، أرسل **رقم العملية (TxID)** هنا ليتم إرساله للإدارة:",
             parse_mode="Markdown",
             reply_markup=kb
         )
 
     elif data == "pay_bep20":
-        await state.update_data(crypto_network="bep20")
+        await state.update_data(crypto_network="BEP20")
         await state.set_state(DepositState.waiting_for_crypto_txid)
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 إلغاء", callback_data="payment_methods")]])
         await callback.message.edit_text(
             f"📌 **USDT - شبكة BEP20**\n\n"
             f"العنوان:\n`{USDT_BEP20_WALLET}`\n\n"
-            f"⚡️ بعد إتمام التحويل، أرسل **رقم العملية (TxID)** هنا ليتم إضافة الرصيد تلقائياً:",
+            f"🔗 بعد إتمام التحويل، أرسل **رقم العملية (TxID)** هنا ليتم إرساله للإدارة:",
             parse_mode="Markdown",
             reply_markup=kb
         )
@@ -246,7 +246,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     elif data.startswith("adm_app_"):
         client_id = int(data.replace("adm_app_", ""))
         admin_action_target[ADMIN_ID] = client_id
-        await callback.message.answer("✍️ **أرسل المبلغ بالدولار لإضافته للزبون:**", parse_mode="Markdown")
+        await callback.message.answer("✍️ **أرسل المبلغ بالدولار (مثلاً 0.3) لإضافته للزبون:**", parse_mode="Markdown")
 
     elif data.startswith("adm_rej_"):
         client_id = int(data.replace("adm_rej_", ""))
@@ -333,7 +333,7 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         f"✅ **تمت عملية الشراء بنجاح!**\n\n"
         f"📦 **الكمية:** {qty}\n"
         f"💰 **الرصيد المتبقي:** `{new_bal:.2f}$`\n\n"
-        f"📧 **الإيميلات الخاصة بك (تمت إزالتها من مخزن البوت):**\n`{emails_str}`",
+        f"📧 **الإيميلات الخاصة بك:**\n`{emails_str}`",
         parse_mode="Markdown",
         reply_markup=kb
     )
@@ -360,7 +360,7 @@ async def process_sham_proof(message: types.Message, state: FSMContext):
     text_content = (message.text or message.caption or "").strip()
 
     kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-    await message.answer("⏳ **تم استلام رقم العملية (شام كاش)، جاري المراجعة من الإدارة...**", parse_mode="Markdown", reply_markup=kb_back)
+    await message.answer("⏳ **تم استلام رقم العملية، جاري المراجعة من الإدارة وإضافة الرصيد...**", parse_mode="Markdown", reply_markup=kb_back)
     
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ قبول وتحديد المبلغ", callback_data=f"adm_app_{user_id}")],
@@ -374,64 +374,27 @@ async def process_crypto_txid(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     txid = message.text.strip()
     data = await state.get_data()
-    network = data.get("crypto_network", "trc20")
+    network = data.get("crypto_network", "USDT")
     await state.clear()
 
     if txid in used_txids:
         await message.answer("❌ **عذراً، رقم العملية هذا تم استخدامه مسبقاً!**")
         return
 
-    wait_msg = await message.answer(f"🔍 **جاري فحص المعاملة على شبكة {network.upper()} وقراءة المبلغ تلقائياً...**", parse_mode="Markdown")
-
-    actual_amount = 0.0
-
-    try:
-        if network == "trc20":
-            req_url = f"https://api.trongrid.io/v1/transactions/{txid}"
-            req = urllib.request.Request(req_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req) as response:
-                res_data = json.loads(response.read().decode())
-                if res_data.get("success") and "data" in res_data and len(res_data["data"]) > 0:
-                    raw_value = res_data["data"][0]["raw_data"]["contract"][0]["parameter"]["value"]
-                    if "amount" in raw_value:
-                        actual_amount = round(float(raw_value["amount"]) / 1_000_000, 2)
-        else:
-            # فحص شبكة BEP20 عبر BscScan API العام المجاني
-            req_url = f"https://api.bscscan.com/api?module=proxy&action=eth_getTransactionByHash&txhash={txid}&apikey=YourApiKeyToken"
-            req = urllib.request.Request(req_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req) as response:
-                res_data = json.loads(response.read().decode())
-                if "result" in res_data and res_data["result"] and "value" in res_data["result"]:
-                    val_hex = res_data["result"]["value"]
-                    actual_amount = round(int(val_hex, 16) / 1_000_000_000_000_000_000, 2)
-    except Exception as e:
-        logging.error(f"Crypto check error: {e}")
-
-    # إذا تعذر جلب القيمة تماماً للشبكتين (مثلاً ضغط خفيف بالبلكشين)، البوت يقوم بشحن قيمة افتراضية آلية فوراً أو يطلب تأكيد الإدارة كحل احتياطي أخير
-    if actual_amount <= 0:
-        actual_amount = 0.45  # القيمة التي حولها الزبون أو القيمة التلقائية الافتراضية للتشغيل الفوري دون توقف
-
-    used_txids.add(txid)
-    new_bal = update_user_balance(user_id, actual_amount)
-    
     kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-    await wait_msg.edit_text(
-        f"🎉 **تم التحقق وشحن الرصيد تلقائياً بنجاح!**\n\n"
-        f"🌐 **الشبكة:** {network.upper()}\n"
-        f"💵 **المبلغ المضاف:** `{actual_amount:.2f}$ (USDT)`\n"
-        f"💰 **رصيدك الحالي:** `{new_bal:.2f}$`",
-        parse_mode="Markdown",
-        reply_markup=kb_back
-    )
+    await message.answer("⏳ **تم استلام رقم العملية (TxID)، جاري مراجعة التحويل من الإدارة وتنزيل الرصيد...**", parse_mode="Markdown", reply_markup=kb_back)
 
-    try:
-        await bot.send_message(
-            chat_id=ADMIN_ID, 
-            text=f"⚡️ **شحن USDT تلقائي ناجح ({network.upper()})!**\n👤 الزبون: {message.from_user.full_name} (`{user_id}`)\n💵 المبلغ: `{actual_amount}$`\n🔗 TxID: `{txid}`", 
-            parse_mode="Markdown"
-        )
-    except:
-        pass
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ إدخال المبلغ وتأكيد الشحن", callback_data=f"adm_app_{user_id}")],
+        [InlineKeyboardButton(text="❌ رفض", callback_data=f"adm_rej_{user_id}")]
+    ])
+    
+    await bot.send_message(
+        chat_id=ADMIN_ID, 
+        text=f"📥 **طلب شحن عملات رقمية جديد!**\n\n👤 الزبون: {message.from_user.full_name} (`{user_id}`)\n🌐 الشبكة: `{network}`\n🔗 TxID: `{txid}`\n\n*(اضغط على زر القبول وأرسل المبلغ الحقيقي مثل 0.3 لتضاف للزبون)*", 
+        parse_mode="Markdown", 
+        reply_markup=admin_kb
+    )
 
 @dp.message(lambda message: message.from_user.id == ADMIN_ID and ADMIN_ID in admin_action_target)
 async def process_admin_amount_input(message: types.Message):
@@ -442,13 +405,13 @@ async def process_admin_amount_input(message: types.Message):
     try:
         amount_to_add = float(message.text.strip())
     except ValueError:
-        await message.answer("❌ يرجى إرسال رقم صحيح للمبلغ:")
+        await message.answer("❌ يرجى إرسال رقم صحيح للمبلغ (مثال: `0.3`):")
         admin_action_target[ADMIN_ID] = client_id
         return
 
     new_bal = update_user_balance(client_id, amount_to_add)
     try:
-        await bot.send_message(chat_id=client_id, text=f"🎉 **تم قبول الإيداع وإضافة الرصيد!**\n➕ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك: `{new_bal:.2f}$`", parse_mode="Markdown")
+        await bot.send_message(chat_id=client_id, text=f"🎉 **تم قبول الإيداع وإضافة الرصيد!**\n➕ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك الحالي: `{new_bal:.2f}$`", parse_mode="Markdown")
     except:
         pass
 
@@ -472,6 +435,7 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
