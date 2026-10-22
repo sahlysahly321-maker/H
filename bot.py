@@ -20,7 +20,6 @@ SPREADSHEET_ID = "1ZKVQTAMGb70ptWjj5eE9QsHg2Fyn-P2UeSiyUKi5Wdc"
 
 TRC20_WALLET = "TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx"
 BEP20_WALLET = "0xd22ccb682b5a8f1dbf6152882673b0130620cb11"
-BSCSCAN_API_KEY = "G3YV8P1M4U9Y6W4T8I6R2F3X4U5A6B7C8D"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
@@ -312,7 +311,14 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    new_bal = update_user_balance(
+    new_bal = update_user_balance(user_id, -total_cost)
+    
+    purchased_emails = []
+    for i in range(qty):
+        email_item = stock[i]
+        purchased_emails.append(email_item)
+        sold_emails_set.add(email_item)
+
 
 
 
