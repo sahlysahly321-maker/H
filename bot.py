@@ -357,51 +357,8 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         await message.answer(f"❌ الكمية غير صالحة. المتوفر: {max_count}")
         return
 
-    total_cost = round(qty * price, 2)
-    bal = get_user_balance(user_id)
+    total_cost = round(
 
-    if bal < total_cost:
-        await message.answer(f"❌ رصيدك غير كافٍ! (متوفر: {bal:.2f}$، المطلوب: {total_cost:.2f}$)")
-        await state.clear()
-        return
-
-    new_bal = update_user_balance(user_id, -total_cost)
-    
-    purchased_emails = []
-    for i in range(qty):
-        email_item = stock[i]
-        purchased_emails.append(email_item)
-        sold_emails_set.add(email_item)
-
-    user_purchases[user_id] = user_purchases.get(user_id, 0) + qty
-
-    emails_str = "\n".join(purchased_emails)
-    
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-    await message.answer(
-        f"✅ **تمت عملية الشراء بنجاح!**\n\n"
-        f"📦 **الكمية:** {qty}\n"
-        f"💰 **الرصيد المتبقي:** `{new_bal:.2f}$`\n\n"
-        f"📧 **الإيميلات الخاصة بك:**\n`{emails_str}`",
-        parse_mode="Markdown",
-        reply_markup=kb
-    )
-    
-    cat_name = "إيميلات قديمة" if cat == "cat_old" else ("إيميلات جديدة" if cat == "cat_new" else "إيميلات (7-30 يوم)")
-    username_str = f"@{message.from_user.username}" if message.from_user.username else "لا يوجد"
-    admin_notification = (
-        f"🛒 **عملية شراء جديدة تمت!**\n\n"
-        f"👤 **الزبون:** {message.from_user.full_name}\n"
-        f"🔗 **المعرف:** {username_str}\n"
-        f"🆔 **ID:** `{user_id}`\n"
-        f"📂 **الفئة:** {cat_name}\n"
-        f"📦 **الكمية:** {qty}\n\n"
-        f"📧 **الإيميلات المباعة (يرجى حذفها من الشيت يدوياً):**\n`{emails_str}`"
-    )
-    try:
-        await bot.send_message(chat_id=ADMIN_ID, text=admin_notification, parse_mode="Markdown")
-    except Exception as e:
-        logging.error(f"Failed to send admin notification:
 
 
 
