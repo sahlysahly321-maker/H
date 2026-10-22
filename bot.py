@@ -29,7 +29,7 @@ dp = Dispatcher(storage=MemoryStorage())
 
 # --- الاتصال بقاعدة بيانات MongoDB السحابية ---
 try:
-    mongo_client = MongoClient(MONGO_URI)
+    mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     db = mongo_client["email_store_db"]
     users_col = db["users"]
     settings_col = db["settings"]
@@ -104,7 +104,7 @@ def fetch_emails_from_sheet(col_index):
     try:
         sold = get_sold_emails()
         url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=Emails"
-        web_page = urllib.request.urlopen(url)
+        web_page = urllib.request.urlopen(url, timeout=10)
         lines = [line.decode('utf-8') for line in web_page.readlines()]
         reader = csv.reader(lines)
         
@@ -570,21 +570,24 @@ async def process_admin_amount_input(message: types.Message):
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
-async def start_web_server():
+async def main():
+    # إعداد سيرفر الـ Web للتجاوب مع Render
     app = web.Application()
     app.router.add_get('/', handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
+    logging.info(f"Web server started on port {port}")
 
-async def main():
+    # حذف الـ Webhook وبدء البوت
     await bot.delete_webhook(drop_pending_updates=True)
-    await start_web_server()
     await dp.start_polling(bot, handle_signals=False)
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
