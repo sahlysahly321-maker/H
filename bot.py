@@ -3,7 +3,6 @@ import logging
 import os
 import urllib.request
 import urllib.parse
-import json
 import csv
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
@@ -12,6 +11,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from pymongo import MongoClient
 
 API_TOKEN = '8735041657:AAHILJgf72t9IzJswxlIUeJK2rsRbhsCNXs'
 ADMIN_ID = 7927059374
@@ -21,59 +21,75 @@ SPREADSHEET_ID = "1ZKVQTAMGb70ptWjj5eE9QsHg2Fyn-P2UeSiyUKi5Wdc"
 USDT_TRC20_WALLET = "TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx"
 USDT_BEP20_WALLET = "0xd22ccb682b5a8f1dbf6152882673b0130620cb11"
 
-DB_FILE = "database.json"
+MONGO_URI = "mongodb+srv://admin:ni0UHkNnm3yRuUZH@cluster0.vbotkrj.mongodb.net/?retryWrites=true&w=majority"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# --- نظام الحفظ وقراءة قاعدة البيانات النصية ---
-def load_db():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                # تحويل المفاتيح النصية إلى أرقام IDs
-                balances = {int(k): v for k, v in data.get("balances", {}).items()}
-                purchases = {int(k): v for k, v in data.get("purchases", {}).items()}
-                referrals = {int(k): v for k, v in data.get("referrals", {}).items()}
-                history = {int(k): v for k, v in data.get("history", {}).items()}
-                sold_emails = set(data.get("sold_emails", []))
-                used_txids = set(data.get("used_txids", []))
-                blocked = set(data.get("blocked_users", []))
-                return balances, purchases, referrals, history, sold_emails, used_txids, blocked
-        except Exception as e:
-            logging.error(f"Error loading database: {e}")
-    return {}, {}, {}, {}, set(), set(), set()
+# --- الاتصال بقاعدة بيانات MongoDB السحابية ---
+try:
+    mongo_client = MongoClient(MONGO_URI)
+    db = mongo_client["email_store_db"]
+    users_col = db["users"]
+    settings_col = db["settings"]
+    logging.info("Connected to MongoDB successfully!")
+except Exception as e:
+    logging.error(f"MongoDB Connection Error: {e}")
 
-def save_db():
-    try:
-        data = {
-            "balances": user_balances,
-            "purchases": user_purchases,
-            "referrals": user_referrals,
-            "history": user_history,
-            "sold_emails": list(sold_emails_set),
-            "used_txids": list(used_txids),
-            "blocked_users": list(blocked_users_set)
+# --- دوال التعامل التلقائي مع قاعدة البيانات السحابية ---
+def get_user_data(user_id):
+    user = users_col.find_one({"user_id": user_id})
+    if not user:
+        user = {
+            "user_id": user_id,
+            "balance": 0.0,
+            "purchases": 0,
+            "referrals": [],
+            "history": [],
+            "is_blocked": False
         }
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        logging.error(f"Error saving database: {e}")
-
-# تحميل البيانات عند الإقلاع
-user_balances, user_purchases, user_referrals, user_history, sold_emails_set, used_txids, blocked_users_set = load_db()
+        users_col.insert_one(user)
+    return user
 
 def get_user_balance(user_id):
-    return user_balances.get(user_id, 0.0)
+    user = get_user_data(user_id)
+    return round(user.get("balance", 0.0), 2)
 
 def update_user_balance(user_id, amount):
     current = get_user_balance(user_id)
     new_bal = round(current + amount, 2)
-    user_balances[user_id] = new_bal
-    save_db()  # حفظ التغيير فوراً
+    users_col.update_one({"user_id": user_id}, {"$set": {"balance": new_bal}}, upsert=True)
     return new_bal
+
+def add_user_history(user_id, entry):
+    users_col.update_one({"user_id": user_id}, {"$push": {"history": entry}}, upsert=True)
+
+def is_user_blocked(user_id):
+    user = users_col.find_one({"user_id": user_id})
+    return user.get("is_blocked", False) if user else False
+
+def set_user_block(user_id, blocked=True):
+    users_col.update_one({"user_id": user_id}, {"$set": {"is_blocked": blocked}}, upsert=True)
+
+def is_txid_used(txid):
+    doc = settings_col.find_one({"type": "used_txids"})
+    if not doc:
+        return False
+    return txid in doc.get("txids", [])
+
+def add_used_txid(txid):
+    settings_col.update_one({"type": "used_txids"}, {"$addToSet": {"txids": txid}}, upsert=True)
+
+def get_sold_emails():
+    doc = settings_col.find_one({"type": "sold_emails"})
+    if not doc:
+        return set()
+    return set(doc.get("emails", []))
+
+def add_sold_emails(emails):
+    settings_col.update_one({"type": "sold_emails"}, {"$addToSet": {"emails": {"$each": emails}}}, upsert=True)
+
 
 class DepositState(StatesGroup):
     waiting_for_sham_proof = State()
@@ -86,6 +102,7 @@ admin_action_target = {}
 
 def fetch_emails_from_sheet(col_index):
     try:
+        sold = get_sold_emails()
         url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=Emails"
         web_page = urllib.request.urlopen(url)
         lines = [line.decode('utf-8') for line in web_page.readlines()]
@@ -95,7 +112,7 @@ def fetch_emails_from_sheet(col_index):
         for row in reader:
             if len(row) > col_index and row[col_index].strip():
                 val = row[col_index].strip().strip('"')
-                if "@" in val and val not in sold_emails_set:
+                if "@" in val and val not in sold:
                     emails_list.append(val)
         return emails_list
     except Exception as e:
@@ -124,22 +141,19 @@ def main_menu(user_id):
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-    if user_id in blocked_users_set:
+    if is_user_blocked(user_id):
         await message.answer("❌ عذراً، أنت محظور من استخدام هذا البوت.")
         return
 
     await state.clear()
-    if user_id not in user_balances:
-        user_balances[user_id] = 0.0
-        save_db()
+    get_user_data(user_id)
 
     args = message.text.split()
     if len(args) > 1:
         try:
             referrer_id = int(args[1])
-            if referrer_id != user_id and referrer_id not in user_referrals.get(user_id, []):
-                user_referrals.setdefault(referrer_id, []).append(user_id)
-                save_db()
+            if referrer_id != user_id:
+                users_col.update_one({"user_id": referrer_id}, {"$addToSet": {"referrals": user_id}}, upsert=True)
         except ValueError:
             pass
 
@@ -154,8 +168,7 @@ async def ban_user(message: types.Message):
     if len(args) > 1:
         try:
             b_id = int(args[1])
-            blocked_users_set.add(b_id)
-            save_db()
+            set_user_block(b_id, True)
             await message.answer(f"🚫 تم حظر المستخدم ذو الأيدي: `{b_id}` بنجاح.", parse_mode="Markdown")
             try:
                 await bot.send_message(chat_id=b_id, text="❌ تم حظرك من استخدام البوت.")
@@ -174,12 +187,8 @@ async def unban_user(message: types.Message):
     if len(args) > 1:
         try:
             b_id = int(args[1])
-            if b_id in blocked_users_set:
-                blocked_users_set.remove(b_id)
-                save_db()
-                await message.answer(f"✅ تم إلغاء حظر المستخدم: `{b_id}`", parse_mode="Markdown")
-            else:
-                await message.answer("⚠️ هذا المستخدم ليس محظوراً أساساً.")
+            set_user_block(b_id, False)
+            await message.answer(f"✅ تم إلغاء حظر المستخدم: `{b_id}`", parse_mode="Markdown")
         except ValueError:
             await message.answer("⚠️ يرجى كتابة ID صحيح.")
     else:
@@ -193,19 +202,22 @@ async def broadcast_message(message: types.Message):
     if not text_to_send:
         await message.answer("⚠️ يرجى كتابة النص بعد الأمر.")
         return
-    all_users = list(user_balances.keys())
-    for u_id in all_users:
-        try:
-            await bot.send_message(chat_id=u_id, text=f"📢 **إعلان من الإدارة:**\n\n{text_to_send}", parse_mode="Markdown")
-            await asyncio.sleep(0.05)
-        except:
-            pass
+    
+    all_users = list(users_col.find({}, {"user_id": 1}))
+    for u in all_users:
+        u_id = u.get("user_id")
+        if u_id:
+            try:
+                await bot.send_message(chat_id=u_id, text=f"📢 **إعلان من الإدارة:**\n\n{text_to_send}", parse_mode="Markdown")
+                await asyncio.sleep(0.05)
+            except:
+                pass
     await message.answer("✅ تم الإرسال بنجاح.")
 
 @dp.callback_query()
 async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
-    if user_id in blocked_users_set:
+    if is_user_blocked(user_id):
         await callback.answer("❌ أنت محظور من استخدام البوت.", show_alert=True)
         return
 
@@ -288,9 +300,10 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
 
     elif data == "my_profile":
         await state.clear()
-        bal = get_user_balance(user_id)
-        total_p = user_purchases.get(user_id, 0)
-        history_list = user_history.get(user_id, ["لا توجد عمليات سابقة حتى الآن."])
+        u_data = get_user_data(user_id)
+        bal = round(u_data.get("balance", 0.0), 2)
+        total_p = u_data.get("purchases", 0)
+        history_list = u_data.get("history", ["لا توجد عمليات سابقة حتى الآن."])
         history_str = "\n".join(history_list[-5:])
         
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
@@ -357,15 +370,21 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             await bot.send_message(chat_id=client_id, text="❌ **تم رفض طلب الشحن من قبل الإدارة.**", parse_mode="Markdown")
         except:
             pass
-        user_history.setdefault(client_id, []).append("❌ رفض الإدارة لطلب إيداع.")
-        save_db()
+        add_user_history(client_id, "❌ رفض الإدارة لطلب إيداع.")
         await callback.message.edit_text(f"{callback.message.text}\n\n❌ **تم رفض الطلب.**", parse_mode="Markdown")
 
     elif data == "referral_system":
         await state.clear()
         bot_info = await bot.get_me()
-        referred_users = user_referrals.get(user_id, [])
-        completed_refs = sum(1 for ref_id in referred_users if user_purchases.get(ref_id, 0) > 0)
+        u_data = get_user_data(user_id)
+        referred_users = u_data.get("referrals", [])
+        
+        completed_refs = 0
+        for ref_id in referred_users:
+            ref_data = get_user_data(ref_id)
+            if ref_data.get("purchases", 0) > 0:
+                completed_refs += 1
+
         ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
         await callback.message.edit_text(
@@ -392,7 +411,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(BuyState.waiting_for_quantity)
 async def process_buy_quantity(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-    if user_id in blocked_users_set:
+    if is_user_blocked(user_id):
         return
 
     user_data = await state.get_data()
@@ -430,11 +449,10 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
     for i in range(qty):
         email_item = stock[i]
         purchased_emails.append(email_item)
-        sold_emails_set.add(email_item)
 
-    user_purchases[user_id] = user_purchases.get(user_id, 0) + qty
-    user_history.setdefault(user_id, []).append(f"🛒 شراء {qty} إيميل بقيمة `{total_cost}$`")
-    save_db()
+    add_sold_emails(purchased_emails)
+    users_col.update_one({"user_id": user_id}, {"$inc": {"purchases": qty}})
+    add_user_history(user_id, f"🛒 شراء {qty} إيميل بقيمة `{total_cost}$`")
 
     emails_str = "\n".join(purchased_emails)
     
@@ -469,13 +487,12 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
 @dp.message(DepositState.waiting_for_sham_proof)
 async def process_sham_proof(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-    if user_id in blocked_users_set:
+    if is_user_blocked(user_id):
         return
 
     await state.clear()
     text_content = (message.text or message.caption or "").strip()
-    user_history.setdefault(user_id, []).append(f"📥 طلب شحن شام كاش (رقم: {text_content})")
-    save_db()
+    add_user_history(user_id, f"📥 طلب شحن شام كاش (رقم: {text_content})")
 
     kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
     await message.answer("⏳ **تم استلام رقم العملية، جاري المراجعة من الإدارة وإضافة الرصيد...**", parse_mode="Markdown", reply_markup=kb_back)
@@ -496,7 +513,7 @@ async def process_sham_proof(message: types.Message, state: FSMContext):
 @dp.message(DepositState.waiting_for_crypto_txid)
 async def process_crypto_txid(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-    if user_id in blocked_users_set:
+    if is_user_blocked(user_id):
         return
 
     txid = message.text.strip()
@@ -504,13 +521,12 @@ async def process_crypto_txid(message: types.Message, state: FSMContext):
     network = data.get("crypto_network", "USDT")
     await state.clear()
 
-    if txid in used_txids:
+    if is_txid_used(txid):
         await message.answer("❌ **عذراً، رقم العملية هذا تم استخدامه مسبقاً!**")
         return
 
-    used_txids.add(txid)
-    user_history.setdefault(user_id, []).append(f"📥 طلب شحن USDT ({network})")
-    save_db()
+    add_used_txid(txid)
+    add_user_history(user_id, f"📥 طلب شحن USDT ({network})")
 
     kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
     await message.answer("⏳ **تم استلام رقم العملية (TxID)، جاري مراجعة التحويل من الإدارة وتنزيل الرصيد...**", parse_mode="Markdown", reply_markup=kb_back)
@@ -542,15 +558,14 @@ async def process_admin_amount_input(message: types.Message):
         return
 
     new_bal = update_user_balance(client_id, amount_to_add)
-    user_history.setdefault(client_id, []).append(f"💰 شحن رصيد مقبول بقيمة `+{amount_to_add:.2f}$`")
-    save_db()
+    add_user_history(client_id, f"💰 شحن رصيد مقبول بقيمة `+{amount_to_add:.2f}$`")
     
     try:
         await bot.send_message(chat_id=client_id, text=f"🎉 **تم قبول الإيداع وإضافة الرصيد!**\n➕ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك الحالي: `{new_bal:.2f}$`", parse_mode="Markdown")
     except:
         pass
 
-    await message.answer(f"✅ تمت إضافة `{amount_to_add:.2f}$` للزبون بنجاح.")
+    await message.answer(f"✅ تمت إضافة `{amount_to_add:.2f}$` للزبون بنجاح ومحفوظة أوتوماتيكياً في قاعدة البيانات.")
 
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
@@ -570,6 +585,7 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
