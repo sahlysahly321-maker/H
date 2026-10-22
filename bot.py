@@ -24,8 +24,6 @@ dp = Dispatcher(storage=MemoryStorage())
 user_balances = {}
 user_purchases = {}
 user_referrals = {}
-
-# قائمة تتبع الإيميلات المباعة لمنع تكرارها حتى لو تأخرت بحذفها من الجدول
 sold_emails_set = set()
 
 def get_user_balance(user_id):
@@ -206,7 +204,7 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
             "📌 **1️⃣ شام كاش**\n\n"
             "العنوان:\n`18a4c2941387daeaf0256639ffc705e8`\n\n"
             "💵 **سعر الصرف المعتمد:** يتم الاعتماد حصراً على سعر الصرف الرسمي المحدث وقت التحويل.\n\n"
-            "⚠️ بعد التحويل اضغط على الزر أدناه وأرسل **رقم العملية** فقط بدون صور أو مبالغ.",
+            "⚠️ بعد التحويل اضغط على الزر أدناه وأرسل **رقم العملية** فقط.",
             parse_mode="Markdown",
             reply_markup=kb
         )
@@ -304,7 +302,6 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
 
     new_bal = update_user_balance(user_id, -total_cost)
     
-    # اختيار الإيميلات وإضافتها إلى قائمة المباع لحجبها فوراً
     purchased_emails = []
     for i in range(qty):
         email_item = stock[i]
@@ -396,6 +393,7 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
