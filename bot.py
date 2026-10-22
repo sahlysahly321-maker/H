@@ -25,12 +25,8 @@ user_balances = {}
 user_purchases = {}
 user_referrals = {}
 
-# مخزن مؤقت في الذاكرة لتحديث المخزون فوراً عند الشراء
-dynamic_stock_cache = {
-    "cat_old": [],
-    "cat_new": [],
-    "cat_medium": []
-}
+# قائمة تتبع الإيميلات المباعة لمنع تكرارها حتى لو تأخرت بحذفها من الجدول
+sold_emails_set = set()
 
 def get_user_balance(user_id):
     return user_balances.get(user_id, 0.0)
@@ -61,7 +57,7 @@ def fetch_emails_from_sheet(col_index):
         for row in reader:
             if len(row) > col_index and row[col_index].strip():
                 val = row[col_index].strip().strip('"')
-                if "@" in val:
+                if "@" in val and val not in sold_emails_set:
                     emails_list.append(val)
         return emails_list
     except Exception as e:
@@ -69,10 +65,13 @@ def fetch_emails_from_sheet(col_index):
         return []
 
 def get_stock(cat):
-    # إذا كان المخزن المؤقت فارغاً، نقوم بجلب البيانات من الشيت
-    if not dynamic_stock_cache[cat]:
-        dynamic_stock_cache[cat] = fetch_emails_from_sheet(0 if cat == "cat_old" else (1 if cat == "cat_new" else 2))
-    return dynamic_stock_cache[cat]
+    if cat == "cat_old":
+        return fetch_emails_from_sheet(0)
+    elif cat == "cat_new":
+        return fetch_emails_from_sheet(1)
+    elif cat == "cat_medium":
+        return fetch_emails_from_sheet(2)
+    return []
 
 def main_menu(user_id):
     bal = get_user_balance(user_id)
@@ -305,10 +304,12 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
 
     new_bal = update_user_balance(user_id, -total_cost)
     
-    # 🚀 الحذف التلقائي الفوري من مخزون البوت النشط
+    # اختيار الإيميلات وإضافتها إلى قائمة المباع لحجبها فوراً
     purchased_emails = []
-    for _ in range(qty):
-        purchased_emails.append(dynamic_stock_cache[cat].pop(0))
+    for i in range(qty):
+        email_item = stock[i]
+        purchased_emails.append(email_item)
+        sold_emails_set.add(email_item)
 
     user_purchases[user_id] = user_purchases.get(user_id, 0) + qty
 
@@ -326,11 +327,11 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
     
     cat_name = "إيميلات قديمة" if cat == "cat_old" else ("إيميلات جديدة" if cat == "cat_new" else "إيميلات (7-30 يوم)")
     admin_notification = (
-        f"🛒 **عملية شراء جديدة تمت وتم حذفها تلقائياً من المخزون النشط!**\n\n"
+        f"🛒 **عملية شراء جديدة تمت!**\n\n"
         f"👤 **الزبون:** {message.from_user.full_name} (`{user_id}`)\n"
         f"📂 **الفئة:** {cat_name}\n"
         f"📦 **الكمية:** {qty}\n\n"
-        f"📧 **الإيميلات المباعة:**\n`{emails_str}`"
+        f"📧 **الإيميلات المباعة (يرجى حذفها من الشيت):**\n`{emails_str}`"
     )
     try:
         await bot.send_message(chat_id=ADMIN_ID, text=admin_notification, parse_mode="Markdown")
