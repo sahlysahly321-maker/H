@@ -319,6 +319,164 @@ async def process_buy_quantity(message: types.Message, state: FSMContext):
         purchased_emails.append(email_item)
         sold_emails_set.add(email_item)
 
+    user_purchases[user_id] = user_purchases.get(user_id, 0) + qty
+
+    emails_str = "\n".join(purchased_emails)
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
+    await message.answer(
+        f"✅ **تمت عملية الشراء بنجاح!**\n\n"
+        f"📦 **الكمية:** {qty}\n"
+        f"💰 **الرصيد المتبقي:** `{new_bal:.2f}$`\n\n"
+        f"📧 **الإيميلات الخاصة بك:**\n`{emails_str}`",
+        parse_mode="Markdown",
+        reply_markup=kb
+    )
+    
+    cat_name = "إيميلات قديمة" if cat == "cat_old" else ("إيميلات جديدة" if cat == "cat_new" else "إيميلات (7-30 يوم)")
+    admin_notification = (
+        f"🛒 **عملية شراء جديدة تمت!**\n\n"
+        f"👤 **الزبون:** {message.from_user.full_name} (`{user_id}`)\n"
+        f"📂 **الفئة:** {cat_name}\n"
+        f"📦 **الكمية:** {qty}\n\n"
+        f"📧 **الإيميلات المباعة (يرجى حذفها من الشيت):**\n`{emails_str}`"
+    )
+    try:
+        await bot.send_message(chat_id=ADMIN_ID, text=admin_notification, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Failed to send admin notification: {e}")
+
+    await state.clear()
+
+@dp.message(DepositState.waiting_for_proof)
+async def process_proof(message: types.Message, state: FSMContext):
+    await state.clear()
+    user_id = message.from_user.id
+    text_content = (message.text or message.caption or "").strip()
+    pending_operations[user_id] = text_content
+
+    kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
+    await message.answer("⏳ **تم استلام رقم العملية، جاري المراجعة من الإدارة...**", parse_mode="Markdown", reply_markup=kb_back)
+    
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ قبول وتحديد المبلغ", callback_data=f"adm_app_{user_id}")],
+        [InlineKeyboardButton(text="❌ رفض الطلب", callback_data=f"adm_rej_{user_id}")]
+    ])
+    
+    await bot.send_message(chat_id=ADMIN_ID, text=f"📥 **طلب شحن شام كاش جديد!**\n👤 من: {message.from_user.full_name}\n🆔 ID: `{user_id}`\n📝 العملية: `{text_content}`", parse_mode="Markdown", reply_markup=admin_kb)
+
+@dp.message(DepositState.waiting_for_crypto_tx)
+async def process_crypto_deposit(message: types.Message, state: FSMContext):
+    await state.clear()
+    user_id = message.from_user.id
+    txid = message.text.strip()
+
+    if txid in processed_txids:
+        await message.answer("❌ **هذا رقم العملية (TxID) تم استخدامه من قبل ولا يمكن تكراره!**", parse_mode="Markdown")
+        return
+
+    wait_msg = await message.answer("⏳ **جاري فحص شبكة البلوكشين والتحقق من التحويل أوتوماتيكياً...**", parse_mode="Markdown")
+
+    amount_found = 0.0
+
+    # 1. فحص شبكة TRON (TRC20)
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"https://api.trongrid.io/v1/transactions/{txid}/events"
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for event in data.get("data", []):
+                        if event.get("event_name") == "Transfer":
+                            value_str = event.get("result", {}).get("value", "0")
+                            val = float(value_str) / 1000000.0
+                            if val > 0:
+                                amount_found = val
+                                break
+    except Exception as e:
+        logging.error(f"TRC20 check error: {e}")
+
+    # 2. فحص شبكة BSC (BEP20)
+    if amount_found <= 0:
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"https://api.bscscan.com/api?module=proxy&action=eth_getTransactionByHash&txhash={txid}"
+                async with session.get(url, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        result = data.get("result")
+                        if result and isinstance(result, dict) and result.get("input"):
+                            input_data = result.get("input", "")
+                            if input_data.startswith("0xa9059cbb"):
+                                hex_val = input_data[74:]
+                                val = int(hex_val, 16) / 1000000.0
+                                if val > 0:
+                                    amount_found = val
+        except Exception as e:
+            logging.error(f"BEP20 check error: {e}")
+
+    if amount_found > 0:
+        processed_txids.add(txid)
+        added_amount = round(amount_found, 2)
+        new_bal = update_user_balance(user_id, added_amount)
+        
+        await wait_msg.edit_text(
+            f"🎉 **تم التحقق من التحويل بنجاح وشحن الرصيد أوتوماتيكياً!**\n\n"
+            f"➕ **تمت إضافة:** `{added_amount:.2f}$`\n"
+            f"💰 **رصيدك الحالي:** `{new_bal:.2f}$`",
+            parse_mode="Markdown"
+        )
+        
+        try:
+            await bot.send_message(
+                chat_id=ADMIN_ID, 
+                text=f"⚡ **عملية شحن USDT تلقائية ناجحة!**\n👤 الزبون: {message.from_user.full_name}\n🆔 ID: `{user_id}`\n💵 المبلغ: `{added_amount:.2f}$`\n🔗 TxID: `{txid}`", 
+                parse_mode="Markdown"
+            )
+        except:
+            pass
+    else:
+        await wait_msg.edit_text("❌ **تعذر التأكد من قيمة العملية على البلوكشين أو أن رقم العملية (TxID) غير صحيح.**\nيرجى التأكد من الرمز أو التواصل مع الدعم.", parse_mode="Markdown")
+
+@dp.message(lambda message: message.from_user.id == ADMIN_ID and ADMIN_ID in admin_action_target)
+async def process_admin_amount_input(message: types.Message):
+    client_id = admin_action_target.pop(ADMIN_ID, None)
+    if not client_id:
+        return
+
+    try:
+        amount_to_add = float(message.text.strip())
+    except ValueError:
+        await message.answer("❌ يرجى إرسال رقم صحيح للمبلغ:")
+        admin_action_target[ADMIN_ID] = client_id
+        return
+
+    new_bal = update_user_balance(client_id, amount_to_add)
+    try:
+        await bot.send_message(chat_id=client_id, text=f"🎉 **تم قبول الإيداع وإضافة الرصيد!**\n➕ المضاف: `{amount_to_add:.2f}$`\n💰 رصيدك: `{new_bal:.2f}$`", parse_mode="Markdown")
+    except:
+        pass
+
+    await message.answer(f"✅ تمت إضافة `{amount_to_add:.2f}$` للزبون بنجاح.")
+
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
+
+async def main():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 10000)))
+    await site.start()
+
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot, handle_signals=False)
+
+if __name__ == '__main__':
+    asyncio.run(main())
+
+
 
 
 
