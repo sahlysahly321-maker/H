@@ -18,7 +18,6 @@ ADMIN_ID = 7927059374
 ADMIN_USERNAME = "@Alaaa057"
 SPREADSHEET_ID = "1ZKVQTAMGb70ptWjj5eE9QsHg2Fyn-P2UeSiyUKi5Wdc"
 
-# عناوين المحافظ الخاصة بك
 USDT_TRC20_WALLET = "TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx"
 USDT_BEP20_WALLET = "0xd22ccb682b5a8f1dbf6152882673b0130620cb11"
 
@@ -30,7 +29,7 @@ user_balances = {}
 user_purchases = {}
 user_referrals = {}
 sold_emails_set = set()
-used_txids = set()  # لتخزين رقم العملية للعملات الرقمية لعدم تكرار استخدامه
+used_txids = set()
 
 def get_user_balance(user_id):
     return user_balances.get(user_id, 0.0)
@@ -221,14 +220,14 @@ async def handle_callbacks(callback: types.CallbackQuery, state: FSMContext):
 
     elif data == "pay_crypto":
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⚡️ إدخال TxID للشحن الفوري والتلقائي", callback_data="check_crypto_tx")],
+            [InlineKeyboardButton(text="⚡️ إدخال TxID للشحن الفوري", callback_data="check_crypto_tx")],
             [InlineKeyboardButton(text="🔙 العودة", callback_data="payment_methods")]
         ])
         await callback.message.edit_text(
             "📌 **2️⃣ عملات رقمية (USDT)**\n\n"
             "🔹 **BEP20:**\n`0xd22ccb682b5a8f1dbf6152882673b0130620cb11`\n\n"
             "🔹 **TRC20:**\n`TAuVtaQATX9TNyNQjKQK11pFKsx6X2hGJx`\n\n"
-            "⚡️ النظام هنا **تلقائي بالكامل**:\nبعد إتمام التحويل، اضغط على الزر أدناه وأرسل **رقم العملية (TxID)** ليتم فحص الشبكة وإضافة الرصيد لحسابك خلال ثوانٍ!",
+            "⚡️ بعد إتمام التحويل، اضغط أدناه وأرسل **رقم العملية (TxID)** ليتم فحص المعاملة وإضافة المبلغ الحقيقي لحسابك!",
             parse_mode="Markdown",
             reply_markup=kb
         )
@@ -373,35 +372,72 @@ async def process_crypto_txid(message: types.Message, state: FSMContext):
         await message.answer("❌ **عذراً، رقم العملية هذا تم استخدامه مسبقاً!**")
         return
 
-    wait_msg = await message.answer("🔍 **جاري فحص المعاملة على شبكة البلوكشين وتأكيد التحويل...**", parse_mode="Markdown")
-
-    # محاكاة الفحص التلقائي للـ API وتحليل القيمة المحولة للعميل
-    await asyncio.sleep(2)
-    
-    # فحص افتراضي لقيمة التحويل (مثال: نعتبر أن المعاملة تم التحقق منها وسحب قيمتها تلقائياً)
-    # في حال أردت ربط مفتاح TronGrid أو BscScan مباشر يمكن جلب القيمة الحقيقية بدقة
-    detected_amount = 5.0  # قيمة افتراضية للتجربة الفورية أو يتم تحديدها ديناميكياً من الـ API
-    
-    used_txids.add(txid)
-    new_bal = update_user_balance(user_id, detected_amount)
-    
-    kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
-    await wait_msg.edit_text(
-        f"🎉 **تم التحقق من المعاملة بنجاح وشحن الرصيد تلقائياً!**\n\n"
-        f"💵 **المبلغ المضاف:** `{detected_amount:.2f}$ (USDT)`\n"
-        f"💰 **رصيدك الحالي:** `{new_bal:.2f}$`",
-        parse_mode="Markdown",
-        reply_markup=kb_back
-    )
+    wait_msg = await message.answer("🔍 **جاري فحص العملية على الشبكة وقراءة المبلغ المحوّل بدقة...**", parse_mode="Markdown")
 
     try:
+        req_url = f"https://api.trongrid.io/v1/transactions/{txid}"
+        req = urllib.request.Request(req_url, headers={'User-Agent': 'Mozilla/5.0'})
+        
+        actual_amount = 0.0
+        with urllib.request.urlopen(req) as response:
+            res_data = json.loads(response.read().decode())
+            if res_data.get("success") and "data" in res_data and len(res_data["data"]) > 0:
+                raw_value = res_data["data"][0]["raw_data"]["contract"][0]["parameter"]["value"]
+                if "amount" in raw_value:
+                    actual_amount = round(float(raw_value["amount"]) / 1_000_000, 2)
+
+        if actual_amount <= 0:
+            kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
+            await wait_msg.edit_text(
+                "⏳ **تم استلاستلم رقم العملية (TxID).**\n"
+                "جاري التحقق من القيمة وتأكيد الإدارة لتنزيل المبلغ الدقيق لحسابك.",
+                parse_mode="Markdown",
+                reply_markup=kb_back
+            )
+            
+            admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ إدخال المبلغ وتأكيد الشحن", callback_data=f"adm_app_{user_id}")],
+                [InlineKeyboardButton(text="❌ رفض", callback_data=f"adm_rej_{user_id}")]
+            ])
+            await bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"📥 **طلب شحن USDT يحتاج تأكيد المبلغ!**\n\n👤 الزبون: {message.from_user.full_name} (`{user_id}`)\n🔗 TxID: `{txid}`",
+                parse_mode="Markdown",
+                reply_markup=admin_kb
+            )
+            return
+
+        used_txids.add(txid)
+        new_bal = update_user_balance(user_id, actual_amount)
+        
+        kb_back = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]])
+        await wait_msg.edit_text(
+            f"🎉 **تم التحقق من الشبكة وشحن الرصيد الفعلي بنجاح!**\n\n"
+            f"💵 **المبلغ المحول والمضاف:** `{actual_amount:.2f}$ (USDT)`\n"
+            f"💰 **رصيدك الحالي:** `{new_bal:.2f}$`",
+            parse_mode="Markdown",
+            reply_markup=kb_back
+        )
+
         await bot.send_message(
             chat_id=ADMIN_ID, 
-            text=f"⚡️ **شحن USDT تلقائي ناجح!**\n👤 الزبون: {message.from_user.full_name} (`{user_id}`)\n💵 المبلغ: `{detected_amount}$`\n🔗 TxID: `{txid}`", 
+            text=f"⚡️ **شحن USDT تلقائي ناجح!**\n👤 الزبون: {message.from_user.full_name} (`{user_id}`)\n💵 المبلغ الحقيقي: `{actual_amount}$`\n🔗 TxID: `{txid}`", 
             parse_mode="Markdown"
         )
-    except:
-        pass
+
+    except Exception as e:
+        logging.error(f"Error checking crypto TX: {e}")
+        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ تحديد المبلغ وإضافته", callback_data=f"adm_app_{user_id}")],
+            [InlineKeyboardButton(text="❌ رفض", callback_data=f"adm_rej_{user_id}")]
+        ])
+        await wait_msg.edit_text("⏳ **تم استلام رقم العملية، جاري مراجعة المبلغ والتأكيد...**")
+        await bot.send_message(
+            chat_id=ADMIN_ID, 
+            text=f"📥 **طلب شحن USDT (مراجعة يدوية للمبلغ):**\n👤 الزبون: {message.from_user.full_name} (`{user_id}`)\n🔗 TxID: `{txid}`", 
+            parse_mode="Markdown", 
+            reply_markup=admin_kb
+        )
 
 @dp.message(lambda message: message.from_user.id == ADMIN_ID and ADMIN_ID in admin_action_target)
 async def process_admin_amount_input(message: types.Message):
@@ -442,6 +478,7 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
